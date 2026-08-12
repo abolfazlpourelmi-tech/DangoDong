@@ -1,0 +1,34 @@
+{
+  "expo": {
+    "name": "دنگودونگ",
+    "slug": "dangodong",
+    "version": "1.0.0",
+    "icon": "./assets/app-icon.png",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dong.mobile"
+    },
+    "android": {
+      "package": "com.dong.mobile",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/app-icon.png",
+        "backgroundColor": "#FFF4E6"
+      },
+      "edgeToEdgeEnabled": true
+    },
+    "plugins": [
+      "expo-font"
+    ],
+    "scheme": "dongodong",
+    "extra": {
+      "eas": {
+        "projectId": "52a3516d-bad5-41e8-9c44-b53c1964a98a"
+      }
+    },
+    "owner": "abp71s-team"
+  }
+}

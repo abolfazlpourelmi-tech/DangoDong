@@ -1,0 +1,16 @@
+node_modules/
+.expo/
+dist/
+work/
+outputs/
+tests/
+supabase/
+.env
+.env.local
+.env.*.local
+npm-debug.log*
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
