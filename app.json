@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.dong.mobile",
-      "versionCode": 2,
+      "versionCode": 3,
       "adaptiveIcon": {
         "foregroundImage": "./assets/app-icon.png",
         "backgroundColor": "#FFF4E6"
