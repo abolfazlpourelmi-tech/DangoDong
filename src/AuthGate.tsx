@@ -15,6 +15,8 @@ import { isSupabaseConfigured, supabase } from './supabase';
 
 type Stage = 'phone' | 'otp' | 'profile' | 'ready';
 
+const OTP_EXPIRY_SECONDS = 60;
+
 function digits(value: string) {
   const persian = '۰۱۲۳۴۵۶۷۸۹';
   const arabic = '٠١٢٣٤٥٦٧٨٩';
@@ -38,6 +40,9 @@ function friendlyError(message: string) {
   }
   if (lower.includes('token') || lower.includes('otp')) return 'کد واردشده صحیح نیست یا منقضی شده است.';
   if (lower.includes('rate')) return 'تعداد درخواست‌ها زیاد شده؛ کمی بعد دوباره تلاش کنید.';
+  if (lower.includes('hook') || lower.includes('service currently unavailable')) {
+    return 'سرویس ارسال پیامک موقتاً پاسخ نداد؛ چند لحظه بعد دوباره تلاش کنید.';
+  }
   return message;
 }
 
@@ -49,6 +54,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [phone, setPhone] = useState('');
   const [submittedPhone, setSubmittedPhone] = useState('');
   const [otp, setOtp] = useState('');
+  const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
+  const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [fullName, setFullName] = useState('');
   const [cardNumber, setCardNumber] = useState('');
   const [error, setError] = useState('');
@@ -91,6 +98,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
     return () => data.subscription.unsubscribe();
   }, []);
 
+  useEffect(() => {
+    if (!otpExpiresAt) return;
+    const updateRemainingTime = () => {
+      const remaining = Math.max(0, Math.ceil((otpExpiresAt - Date.now()) / 1000));
+      setSecondsRemaining(remaining);
+    };
+    updateRemainingTime();
+    const timer = setInterval(updateRemainingTime, 1000);
+    return () => clearInterval(timer);
+  }, [otpExpiresAt]);
+
   async function requestOtp() {
     if (!supabase) return;
     const formatted = iranPhone(phone);
@@ -107,11 +125,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
       return;
     }
     setSubmittedPhone(formatted);
+    setSecondsRemaining(OTP_EXPIRY_SECONDS);
+    setOtpExpiresAt(Date.now() + OTP_EXPIRY_SECONDS * 1000);
     setStage('otp');
   }
 
   async function verifyOtp() {
     if (!supabase) return;
+    if (secondsRemaining <= 0) {
+      setError('اعتبار کد تمام شده؛ دوباره کد بگیر.');
+      return;
+    }
     const token = digits(otp);
     if (token.length !== 6) {
       setError('کد شش‌رقمی را کامل وارد کنید.');
@@ -208,9 +232,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
               placeholderTextColor="#A19BA9"
               style={[styles.input, styles.otpInput]}
               textAlign="center"
-              value={otp}
+            value={otp}
             />
-            <Pressable onPress={() => { setStage('phone'); setOtp(''); setError(''); }}><Text style={styles.link}>اصلاح شماره موبایل</Text></Pressable>
+            <Text style={styles.otpTimer}>
+              {secondsRemaining > 0
+                ? `اعتبار کد: ${String(Math.floor(secondsRemaining / 60)).padStart(2, '0')}:${String(secondsRemaining % 60).padStart(2, '0')}`
+                : 'اعتبار کد تمام شده؛ دوباره کد بگیر.'}
+            </Text>
+            <Pressable onPress={() => { setStage('phone'); setOtp(''); setOtpExpiresAt(null); setSecondsRemaining(0); setError(''); }}><Text style={styles.link}>اصلاح شماره موبایل</Text></Pressable>
           </>
         )}
         {stage === 'profile' && (
@@ -248,6 +277,7 @@ const styles = StyleSheet.create({
   label: { color: '#25203A', fontSize: 14, fontWeight: '700', textAlign: 'right', writingDirection: 'rtl', marginBottom: 7 },
   input: { width: '100%', minHeight: 56, borderWidth: 1, borderColor: '#E5DCD2', borderRadius: 18, backgroundColor: '#FFFFFF', color: '#25203A', paddingHorizontal: 16, fontSize: 16, marginBottom: 16 },
   otpInput: { fontSize: 25, letterSpacing: 10 },
+  otpTimer: { color: '#777184', fontSize: 13, fontWeight: '700', marginTop: -6, marginBottom: 14, writingDirection: 'rtl' },
   hint: { color: '#777184', fontSize: 12, textAlign: 'right', writingDirection: 'rtl', marginTop: -6, marginBottom: 10 },
   error: { width: '100%', color: '#C84359', backgroundColor: '#FFE8EC', borderRadius: 14, padding: 12, textAlign: 'right', writingDirection: 'rtl', lineHeight: 21, marginBottom: 14 },
   button: { width: '100%', minHeight: 56, borderRadius: 18, backgroundColor: '#6652D9', alignItems: 'center', justifyContent: 'center', marginTop: 4 },
