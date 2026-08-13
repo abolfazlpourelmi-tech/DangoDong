@@ -38,6 +38,7 @@ import {
   type Transfer,
 } from './src/settlement';
 import { AuthGate } from './src/AuthGate';
+import { supabase } from './src/supabase';
 import {
   addOnlineGuest,
   completeOnlineStory,
@@ -69,6 +70,7 @@ const {
   Plus,
   Copy,
   ReceiptText,
+  LogOut,
   ShoppingBasket,
   Sparkles,
   Utensils,
@@ -349,6 +351,14 @@ function DongoApp() {
     } finally {
       setStoriesLoading(false);
     }
+  }
+
+  async function signOut() {
+    if (!supabase || cloudBusy) return;
+    setCloudBusy(true);
+    const { error } = await supabase.auth.signOut();
+    setCloudBusy(false);
+    if (error) showToast('خروج از حساب انجام نشد؛ دوباره تلاش کن.');
   }
 
   useEffect(() => {
@@ -685,6 +695,7 @@ function DongoApp() {
         <View style={styles.dashboardHero}>
           <View style={styles.dashboardHeroIcon}><WalletCards size={27} color={C.purple} /></View>
           <View style={styles.dashboardHeroCopy}><AppText style={styles.dashboardEyebrow}>همه‌چیز یک‌جا</AppText><AppText style={styles.dashboardTitle}>ماجراهای من</AppText><AppText style={styles.dashboardText}>ماجراهای در جریان را ادامه بده یا حساب ماجراهای قبلی را مرور کن.</AppText></View>
+          <Pressable accessibilityRole="button" accessibilityLabel="خروج از حساب" disabled={cloudBusy} onPress={() => void signOut()} style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed, cloudBusy && { opacity: 0.65 }]}><LogOut size={17} color={C.muted} /></Pressable>
         </View>
         <View style={styles.dashboardActions}>
           <Pressable accessibilityRole="button" onPress={openNewStory} style={styles.dashboardNewStory}><Plus size={19} color="#FFFFFF" /><AppText style={styles.dashboardNewStoryText}>ساخت ماجرای جدید</AppText></Pressable>
@@ -1602,6 +1613,7 @@ const styles = StyleSheet.create({
   newStoryFromSwitcher: { minHeight: 55, borderRadius: 18, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 15 },
   newStoryFromSwitcherText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 12 },
   dashboardHero: { minHeight: 142, borderRadius: 27, backgroundColor: C.purplePale, borderWidth: 1, borderColor: '#DCD4FA', padding: 18, flexDirection: 'row-reverse', alignItems: 'center', gap: 13 },
+  logoutButton: { width: 40, height: 40, borderRadius: 14, backgroundColor: '#F8F6F3', alignItems: 'center', justifyContent: 'center' },
   dashboardHeroIcon: { width: 62, height: 62, borderRadius: 22, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-4deg' }] },
   dashboardHeroCopy: { flex: 1, alignItems: 'flex-end' },
   dashboardEyebrow: { fontFamily: F.semi, color: C.purple, fontSize: 9 },
