@@ -14,10 +14,10 @@
   "dependencies": {
     "@expo-google-fonts/estedad": "^0.4.0",
     "@expo/metro-runtime": "~6.1.2",
-    "@react-native-async-storage/async-storage": "^3.1.1",
+    "@react-native-async-storage/async-storage": "2.2.0",
     "@supabase/supabase-js": "^2.112.3",
     "expo": "~54.0.0",
-    "expo-clipboard": "^57.0.1",
+    "expo-clipboard": "~8.0.8",
     "expo-font": "~14.0.12",
     "expo-haptics": "~15.0.8",
     "expo-linear-gradient": "~15.0.8",
