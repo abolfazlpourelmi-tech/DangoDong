@@ -20,7 +20,9 @@ jobs:
       - name: Read app version
         id: app_version
         shell: bash
-        run: echo "value=$(node -p \"require('./app.json').expo.version\")" >> "$GITHUB_OUTPUT"
+        run: |
+          APP_VERSION=$(node -p "require('./app.json').expo.version")
+          echo "value=$APP_VERSION" >> "$GITHUB_OUTPUT"
 
       - name: Verify release tag matches app version
         if: startsWith(github.ref, 'refs/tags/v')
