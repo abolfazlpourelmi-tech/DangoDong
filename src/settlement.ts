@@ -6,6 +6,7 @@ export type Member = {
   shareUnits?: number;
   kind?: 'registered' | 'guest';
   userId?: string;
+  householdMembers?: string[];
 };
 
 export type ExpenseCategory = 'stay' | 'food' | 'transport' | 'shopping' | 'fun' | 'other';
@@ -19,6 +20,7 @@ export type Expense = {
   allocations?: ExpenseAllocation[];
   createdAt: string;
   category?: ExpenseCategory;
+  participantPersonCount?: number;
 };
 
 export type ExpenseAllocation = {

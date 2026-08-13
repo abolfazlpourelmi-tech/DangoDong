@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -16,11 +17,26 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Read app version
+        id: app_version
+        shell: bash
+        run: echo "value=$(node -p \"require('./app.json').expo.version\")" >> "$GITHUB_OUTPUT"
+
+      - name: Verify release tag matches app version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: test "$GITHUB_REF_NAME" = "v${{ steps.app_version.outputs.value }}"
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -29,13 +45,13 @@ jobs:
           java-version: '17'
 
       - name: Install dependencies
-        run: npm install
+        run: pnpm install --frozen-lockfile
 
       - name: Generate Android project
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
-        run: npx expo prebuild --platform android --non-interactive
+        run: pnpm exec expo prebuild --platform android --non-interactive
 
       - name: Build release APK
         working-directory: android
@@ -54,11 +70,12 @@ jobs:
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          APP_VERSION: ${{ steps.app_version.outputs.value }}
         run: |
           BUILD_TOOLS=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
           UNSIGNED_APK=android/app/build/outputs/apk/release/app-release.apk
           ALIGNED_APK="$RUNNER_TEMP/dangodong-aligned.apk"
-          SIGNED_APK=android/app/build/outputs/apk/release/dangodong-release.apk
+          SIGNED_APK="android/app/build/outputs/apk/release/dangodong-v${APP_VERSION}.apk"
           "$BUILD_TOOLS/zipalign" -f -p 4 "$UNSIGNED_APK" "$ALIGNED_APK"
           "$BUILD_TOOLS/apksigner" sign --ks "$KEYSTORE_PATH" --ks-key-alias "$KEY_ALIAS" --ks-pass "pass:$KEYSTORE_PASSWORD" --key-pass "pass:$KEY_PASSWORD" --out "$SIGNED_APK" "$ALIGNED_APK"
           "$BUILD_TOOLS/apksigner" verify --verbose "$SIGNED_APK"
@@ -66,6 +83,19 @@ jobs:
       - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: dangodong-release-apk
-          path: android/app/build/outputs/apk/release/dangodong-release.apk
+          name: dangodong-v${{ steps.app_version.outputs.value }}-apk
+          path: android/app/build/outputs/apk/release/dangodong-v${{ steps.app_version.outputs.value }}.apk
           retention-days: 14
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APP_VERSION: ${{ steps.app_version.outputs.value }}
+        run: |
+          APK="android/app/build/outputs/apk/release/dangodong-v${APP_VERSION}.apk"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$APK" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$APK" --repo "$GITHUB_REPOSITORY" --verify-tag --title "دنگودونگ $GITHUB_REF_NAME" --generate-notes
+          fi

@@ -38,8 +38,8 @@ export async function loadOnlineStories(): Promise<OnlineStory[]> {
 
   const storyIds = storyRows.map((row) => row.id);
   const [{ data: memberRows, error: memberError }, { data: expenseRows, error: expenseError }, { data: settlementRows, error: settlementError }] = await Promise.all([
-    supabase.from('story_members').select('id, story_id, user_id, share_units, member_kind, display_name, joined_at').in('story_id', storyIds),
-    supabase.from('expenses').select('id, story_id, title, amount, category, paid_by, created_at').in('story_id', storyIds).order('created_at', { ascending: false }),
+    supabase.from('story_members').select('id, story_id, user_id, share_units, member_kind, display_name, household_members, joined_at').in('story_id', storyIds),
+    supabase.from('expenses').select('id, story_id, title, amount, category, paid_by, participant_person_count, created_at').in('story_id', storyIds).order('created_at', { ascending: false }),
     supabase.from('settlements').select('id, story_id, from_member_id, to_member_id, amount, status, paid_at, created_at').in('story_id', storyIds),
   ]);
   if (memberError) throw memberError;
@@ -62,15 +62,28 @@ export async function loadOnlineStories(): Promise<OnlineStory[]> {
   return storyRows.map((story) => {
     const storyMembers: Member[] = (memberRows ?? [])
       .filter((row) => row.story_id === story.id)
-      .map((row, index) => ({
-        id: row.id,
-        name: row.member_kind === 'guest' ? row.display_name : (profileNames.get(row.user_id) ?? 'عضو دنگودونگ'),
-        color: COLORS[index % COLORS.length],
-        isMe: row.user_id === currentUserId,
-        shareUnits: row.share_units,
-        kind: row.member_kind,
-        userId: row.user_id ?? undefined,
-      }));
+      .map((row, index) => {
+        const displayName = row.member_kind === 'guest' ? row.display_name : (profileNames.get(row.user_id) ?? 'عضو دنگودونگ');
+        const count = Math.max(1, Number(row.share_units ?? 1));
+        const savedNames = Array.isArray(row.household_members)
+          ? row.household_members.map((name: unknown) => String(name).trim()).filter(Boolean).slice(0, count)
+          : [];
+        const householdMembers = Array.from({ length: count }, (_, personIndex) => (
+          (personIndex === 0 && row.member_kind !== 'guest')
+            ? displayName
+            : (savedNames[personIndex] || (personIndex === 0 ? displayName : `نفر ${personIndex + 1}`))
+        ));
+        return {
+          id: row.id,
+          name: displayName,
+          color: COLORS[index % COLORS.length],
+          isMe: row.user_id === currentUserId,
+          shareUnits: count,
+          kind: row.member_kind,
+          userId: row.user_id ?? undefined,
+          householdMembers,
+        };
+      });
     const storyExpenses: Expense[] = (expenseRows ?? [])
       .filter((row) => row.story_id === story.id)
       .map((row) => ({
@@ -80,6 +93,7 @@ export async function loadOnlineStories(): Promise<OnlineStory[]> {
         payerId: row.paid_by,
         category: row.category,
         createdAt: relativeTime(row.created_at),
+        participantPersonCount: Math.max(1, Number(row.participant_person_count ?? 1)),
         allocations: (shareRows ?? []).filter((share) => share.expense_id === row.id).map((share) => ({
           memberId: share.member_id,
           amount: Number(share.amount),
@@ -110,7 +124,7 @@ export async function loadOnlineStories(): Promise<OnlineStory[]> {
   });
 }
 
-export async function createOnlineStory(name: string, template: OnlineStory['template'], shareUnits: number) {
+export async function createOnlineStory(name: string, template: OnlineStory['template'], shareUnits: number, householdMembers: string[]) {
   if (!supabase) throw new Error('Supabase is not configured');
   const { data, error } = await supabase.rpc('create_story', {
     story_name: name,
@@ -118,10 +132,15 @@ export async function createOnlineStory(name: string, template: OnlineStory['tem
     owner_share_units: shareUnits,
   });
   if (error) throw error;
+  const { error: householdError } = await supabase.rpc('set_current_household_members', {
+    target_story_id: data,
+    member_names: householdMembers,
+  });
+  if (householdError) throw householdError;
   return data as string;
 }
 
-export async function addOnlineGuest(storyId: string, name: string, shareUnits: number) {
+export async function addOnlineGuest(storyId: string, name: string, shareUnits: number, householdMembers: string[]) {
   if (!supabase) throw new Error('Supabase is not configured');
   const { data, error } = await supabase.rpc('add_guest_member', {
     target_story_id: storyId,
@@ -129,10 +148,15 @@ export async function addOnlineGuest(storyId: string, name: string, shareUnits: 
     guest_share_units: shareUnits,
   });
   if (error) throw error;
+  const { error: householdError } = await supabase.rpc('set_household_members', {
+    target_member_id: data,
+    member_names: householdMembers,
+  });
+  if (householdError) throw householdError;
   return data as string;
 }
 
-export async function updateOnlineMember(memberId: string, name: string, shareUnits: number) {
+export async function updateOnlineMember(memberId: string, name: string, shareUnits: number, householdMembers: string[]) {
   if (!supabase) throw new Error('Supabase is not configured');
   const { error } = await supabase.rpc('update_story_member', {
     target_member_id: memberId,
@@ -140,6 +164,11 @@ export async function updateOnlineMember(memberId: string, name: string, shareUn
     member_share_units: shareUnits,
   });
   if (error) throw error;
+  const { error: householdError } = await supabase.rpc('set_household_members', {
+    target_member_id: memberId,
+    member_names: householdMembers,
+  });
+  if (householdError) throw householdError;
 }
 
 export async function deleteOnlineStory(storyId: string) {
@@ -148,13 +177,18 @@ export async function deleteOnlineStory(storyId: string) {
   if (error) throw error;
 }
 
-export async function joinOnlineStory(inviteCode: string, shareUnits: number) {
+export async function joinOnlineStory(inviteCode: string, shareUnits: number, householdMembers: string[]) {
   if (!supabase) throw new Error('Supabase is not configured');
   const { data, error } = await supabase.rpc('join_story_by_code', {
     join_code: inviteCode.trim().toUpperCase(),
     member_share_units: shareUnits,
   });
   if (error) throw error;
+  const { error: householdError } = await supabase.rpc('set_current_household_members', {
+    target_story_id: data,
+    member_names: householdMembers,
+  });
+  if (householdError) throw householdError;
   return data as string;
 }
 
@@ -173,6 +207,11 @@ export async function createOnlineExpense(storyId: string, expense: Expense) {
     })),
   });
   if (error) throw error;
+  const { error: participantCountError } = await supabase.rpc('set_expense_participant_person_count', {
+    target_expense_id: data,
+    person_count: Math.max(1, Math.round(expense.participantPersonCount ?? expense.allocations?.length ?? 1)),
+  });
+  if (participantCountError) throw participantCountError;
   return data as string;
 }
 

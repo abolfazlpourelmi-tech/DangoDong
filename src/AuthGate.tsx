@@ -16,6 +16,9 @@ import { isSupabaseConfigured, supabase } from './supabase';
 type Stage = 'phone' | 'otp' | 'profile' | 'ready';
 
 const OTP_EXPIRY_SECONDS = 60;
+const isLocalWebPreview = Platform.OS === 'web'
+  && typeof window !== 'undefined'
+  && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
 function digits(value: string) {
   const persian = '۰۱۲۳۴۵۶۷۸۹';
@@ -57,7 +60,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
   const [otpExpiresAt, setOtpExpiresAt] = useState<number | null>(null);
   const [secondsRemaining, setSecondsRemaining] = useState(0);
   const [fullName, setFullName] = useState('');
-  const [cardNumber, setCardNumber] = useState('');
   const [error, setError] = useState('');
 
   async function resolveAccount(nextSession: Session | null) {
@@ -68,19 +70,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
       return;
     }
 
-    const [{ data: profile, error: profileError }, { data: paymentMethod, error: paymentError }] = await Promise.all([
-      supabase.from('profiles').select('full_name, phone').eq('id', nextSession.user.id).maybeSingle(),
-      supabase.from('payment_methods').select('card_number').eq('user_id', nextSession.user.id).maybeSingle(),
-    ]);
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('full_name, phone')
+      .eq('id', nextSession.user.id)
+      .maybeSingle();
 
-    if (profileError || paymentError) {
-      setError(friendlyError((profileError ?? paymentError)?.message ?? 'خطا در دریافت حساب'));
+    if (profileError) {
+      setError(friendlyError(profileError.message));
       setStage('profile');
-    } else if (profile && paymentMethod) {
+    } else if (profile) {
       setStage('ready');
     } else {
-      setFullName(profile?.full_name ?? '');
-      setCardNumber(paymentMethod?.card_number ?? '');
+      setFullName('');
       setStage('profile');
     }
     setLoading(false);
@@ -155,13 +157,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
   async function saveProfile() {
     if (!supabase || !session) return;
     const name = fullName.trim();
-    const card = digits(cardNumber);
     if (name.length < 2) {
       setError('نام و نام خانوادگی را کامل وارد کنید.');
-      return;
-    }
-    if (card.length !== 16) {
-      setError('شماره کارت باید دقیقاً ۱۶ رقم باشد.');
       return;
     }
     setSubmitting(true);
@@ -178,20 +175,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setError(friendlyError(profileError.message));
       return;
     }
-    const { error: paymentError } = await supabase.from('payment_methods').upsert({
-      user_id: session.user.id,
-      card_number: card,
-      updated_at: new Date().toISOString(),
-    });
     setSubmitting(false);
-    if (paymentError) {
-      setError(friendlyError(paymentError.message));
-      return;
-    }
     setStage('ready');
   }
 
   if (!isSupabaseConfigured) return <>{children}</>;
+  // Local browser previews must never consume SMS credits. Production Android
+  // builds do not satisfy this localhost-only condition.
+  if (isLocalWebPreview) return <>{children}</>;
   if (loading) return <SafeAreaView style={styles.page}><ActivityIndicator size="large" color="#6652D9" /></SafeAreaView>;
   if (stage === 'ready') return <>{children}</>;
 
@@ -203,7 +194,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
         <Text style={styles.subtitle}>
           {stage === 'phone' && 'شماره موبایلت را وارد کن تا کد ورود برایت ارسال شود.'}
           {stage === 'otp' && 'کد شش‌رقمی ارسال‌شده را وارد کن.'}
-          {stage === 'profile' && 'این اطلاعات برای نمایش نام و تسویه دنگ‌ها استفاده می‌شود.'}
+          {stage === 'profile' && 'فقط نامت را وارد کن؛ اطلاعات تکمیلی را بعداً در حساب کاربری می‌توانی تکمیل کنی.'}
         </Text>
 
         {stage === 'phone' && (
@@ -246,9 +237,6 @@ export function AuthGate({ children }: { children: ReactNode }) {
           <View style={styles.fields}>
             <Text style={styles.label}>نام و نام خانوادگی</Text>
             <TextInput accessibilityLabel="نام و نام خانوادگی" onChangeText={setFullName} placeholder="مثلاً امیر رضایی" placeholderTextColor="#A19BA9" style={styles.input} textAlign="right" value={fullName} />
-            <Text style={styles.label}>شماره کارت برای دریافت دنگ</Text>
-            <TextInput accessibilityLabel="شماره کارت" keyboardType="number-pad" maxLength={16} onChangeText={(value) => setCardNumber(digits(value).slice(0, 16))} placeholder="۱۶ رقم بدون فاصله" placeholderTextColor="#A19BA9" style={styles.input} textAlign="center" value={cardNumber} />
-            <Text style={styles.hint}>رمز، CVV2 و تاریخ انقضا دریافت یا ذخیره نمی‌شوند.</Text>
           </View>
         )}
 

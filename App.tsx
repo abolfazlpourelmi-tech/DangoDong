@@ -12,6 +12,7 @@ import { StatusBar } from 'expo-status-bar';
 import * as LucideIcons from 'lucide-react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BackHandler,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -57,6 +58,7 @@ import {
 // same; narrowing the third-party icon namespace here keeps app types stable.
 const {
   ArrowLeft,
+  ArrowRight,
   BedDouble,
   Bell,
   CarFront,
@@ -79,6 +81,7 @@ const {
   Trash2,
   AlertTriangle,
   WalletCards,
+  UserRound,
   X,
 } = LucideIcons as Record<string, any>;
 
@@ -113,6 +116,9 @@ const F = {
 };
 
 const AVATAR_COLORS = ['#6652D9', '#FF7A6B', '#4FC7A4', '#F0A83A', '#4E82D8', '#A95AC2'];
+const isLocalWebPreview = Platform.OS === 'web'
+  && typeof window !== 'undefined'
+  && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
 
 const CATEGORIES = [
   { id: 'food' as const, label: 'غذا', Icon: Utensils, color: '#E85F50', bg: C.coralPale },
@@ -123,6 +129,13 @@ const CATEGORIES = [
 ];
 
 type SplitMode = 'equal' | 'custom' | 'itemized';
+
+type ExpensePerson = {
+  id: string;
+  memberId: string;
+  name: string;
+  accountName: string;
+};
 
 type AccountNotification = {
   id: string;
@@ -174,6 +187,10 @@ function normalizeDigits(value: string) {
     .replace(/[۰-۹]/g, (digit) => String(persian.indexOf(digit)))
     .replace(/[٠-٩]/g, (digit) => String(arabic.indexOf(digit)))
     .replace(/[^0-9]/g, '');
+}
+
+function parseHouseholdNames(value: string) {
+  return value.split(/[\n,،]+/).map((name) => name.trim()).filter(Boolean).slice(0, 20);
 }
 
 function categoryInfo(category?: ExpenseCategory) {
@@ -234,12 +251,14 @@ function DongoApp() {
   const [storiesHome, setStoriesHome] = useState(false);
   const [newStoryName, setNewStoryName] = useState('');
   const [newOwnerUnits, setNewOwnerUnits] = useState('1');
+  const [ownerFamilyModal, setOwnerFamilyModal] = useState(false);
+  const [ownerFamilyNames, setOwnerFamilyNames] = useState<string[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payments, setPayments] = useState<SettlementPayment[]>([]);
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
   const [expenseFilter, setExpenseFilter] = useState<'all' | 'week' | 'mine'>('all');
-  const [tab, setTab] = useState<'home' | 'expenses' | 'settlement'>('home');
+  const [tab, setTab] = useState<'home' | 'expenses' | 'settlement' | 'account'>('home');
   const [expenseModal, setExpenseModal] = useState(false);
   const [memberModal, setMemberModal] = useState(false);
   const [editMemberModal, setEditMemberModal] = useState(false);
@@ -248,22 +267,33 @@ function DongoApp() {
   const [joinModal, setJoinModal] = useState(false);
   const [joinCode, setJoinCode] = useState('');
   const [joinUnits, setJoinUnits] = useState('1');
+  const [joinHouseholdNameInputs, setJoinHouseholdNameInputs] = useState<string[]>([]);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<ExpenseCategory>('food');
   const [payerId, setPayerId] = useState('');
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
   const [splitMode, setSplitMode] = useState<SplitMode>('equal');
   const [shareInputs, setShareInputs] = useState<Record<string, string>>({});
   const [itemLabels, setItemLabels] = useState<Record<string, string>>({});
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberUnits, setNewMemberUnits] = useState('1');
+  const [newHouseholdNameInputs, setNewHouseholdNameInputs] = useState<string[]>([]);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [editMemberName, setEditMemberName] = useState('');
   const [editMemberUnits, setEditMemberUnits] = useState('1');
+  const [editHouseholdNameInputs, setEditHouseholdNameInputs] = useState<string[]>([]);
   const activeStoryIdRef = useRef('');
   const [toast, setToast] = useState('');
+  const [accountName, setAccountName] = useState('');
+  const [accountCardNumber, setAccountCardNumber] = useState('');
+  const [accountPhone, setAccountPhone] = useState('');
+  const [accountLoading, setAccountLoading] = useState(true);
+  const [accountSaving, setAccountSaving] = useState(false);
+  const [accountError, setAccountError] = useState('');
+  const lastBackPressAt = useRef(0);
 
   const balances = useMemo(() => applySettlementPayments(calculateBalances(members, expenses), payments), [members, expenses, payments]);
   const transfers = useMemo(() => createSettlement(balances), [balances]);
@@ -272,14 +302,22 @@ function DongoApp() {
   const currentMember = members.find((member) => member.isMe) ?? members[0];
   const currentBalance = balances.find((balance) => balance.memberId === currentMember?.id)?.amount ?? 0;
   const numericAmount = Number(amount || 0);
-  const selectedShareUnits = members
-    .filter((member) => selectedIds.includes(member.id))
-    .reduce((sum, member) => sum + Math.max(1, member.shareUnits ?? 1), 0);
+  const expensePeople = useMemo<ExpensePerson[]>(() => members.flatMap((member) => {
+    const count = Math.max(1, member.shareUnits ?? 1);
+    const names = member.householdMembers?.filter(Boolean) ?? [];
+    return Array.from({ length: count }, (_, index) => ({
+      id: `${member.id}::${index}`,
+      memberId: member.id,
+      name: names[index] || (count === 1 ? (member.isMe ? 'من' : member.name) : `نفر ${faNumber.format(index + 1)}`),
+      accountName: member.isMe ? 'حساب من' : member.name,
+    }));
+  }), [members]);
+  const selectedShareUnits = selectedPersonIds.length;
   const totalShareUnits = members.reduce((sum, member) => sum + Math.max(1, member.shareUnits ?? 1), 0);
   const sharePreview = selectedShareUnits ? Math.ceil(numericAmount / selectedShareUnits) : 0;
-  const enteredShareTotal = members.reduce((sum, member) => sum + Number(shareInputs[member.id] || 0), 0);
+  const enteredShareTotal = expensePeople.reduce((sum, person) => sum + Number(shareInputs[person.id] || 0), 0);
   const hasValidShares = splitMode === 'equal'
-    ? selectedIds.length > 0
+    ? selectedPersonIds.length > 0
     : enteredShareTotal === numericAmount && enteredShareTotal > 0;
   const isExpenseValid = numericAmount > 0 && Boolean(title.trim()) && Boolean(payerId) && hasValidShares;
   const memberById = (id: string) => members.find((member) => member.id === id);
@@ -319,6 +357,11 @@ function DongoApp() {
     const me = story.members.find((member) => member.isMe) ?? story.members[0];
     setPayerId(me?.id ?? '');
     setSelectedIds(story.members.map((member) => member.id));
+    const people = story.members.flatMap((member) => Array.from(
+      { length: Math.max(1, member.shareUnits ?? 1) },
+      (_, index) => `${member.id}::${index}`,
+    ));
+    setSelectedPersonIds(people);
   }
 
   async function syncFromCloud(preferredStoryId?: string, openStory = false) {
@@ -353,6 +396,69 @@ function DongoApp() {
     }
   }
 
+  async function loadAccount() {
+    if (!supabase) return;
+    setAccountLoading(true);
+    setAccountError('');
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    const user = userData.user;
+    if (userError || !user) {
+      setAccountError('دریافت اطلاعات حساب ناموفق بود.');
+      setAccountLoading(false);
+      return;
+    }
+    const [{ data: profile, error: profileError }, { data: paymentMethod, error: paymentError }] = await Promise.all([
+      supabase.from('profiles').select('full_name, phone').eq('id', user.id).maybeSingle(),
+      supabase.from('payment_methods').select('card_number').eq('user_id', user.id).maybeSingle(),
+    ]);
+    if (profileError || paymentError) {
+      setAccountError('دریافت اطلاعات حساب ناموفق بود.');
+    } else {
+      setAccountName(profile?.full_name ?? '');
+      setAccountPhone(profile?.phone ?? user.phone ?? '');
+      setAccountCardNumber(paymentMethod?.card_number ?? '');
+    }
+    setAccountLoading(false);
+  }
+
+  async function saveAccount() {
+    if (!supabase || accountSaving) return;
+    const name = accountName.trim();
+    const card = normalizeDigits(accountCardNumber);
+    if (name.length < 2) {
+      setAccountError('نام و نام خانوادگی اجباری است.');
+      return;
+    }
+    if (card && card.length !== 16) {
+      setAccountError('شماره کارت باید ۱۶ رقم باشد یا خالی بماند.');
+      return;
+    }
+    const { data: userData } = await supabase.auth.getUser();
+    if (!userData.user) return;
+    setAccountSaving(true);
+    setAccountError('');
+    const { error: profileError } = await supabase.from('profiles').upsert({
+      id: userData.user.id,
+      full_name: name,
+      phone: accountPhone || userData.user.phone,
+      updated_at: new Date().toISOString(),
+    });
+    if (profileError) {
+      setAccountSaving(false);
+      setAccountError('ذخیره اطلاعات انجام نشد.');
+      return;
+    }
+    const { error: paymentError } = card
+      ? await supabase.from('payment_methods').upsert({ user_id: userData.user.id, card_number: card, updated_at: new Date().toISOString() })
+      : await supabase.from('payment_methods').delete().eq('user_id', userData.user.id);
+    setAccountSaving(false);
+    if (paymentError) {
+      setAccountError('ذخیره شماره کارت انجام نشد.');
+      return;
+    }
+    showToast('اطلاعات حساب ذخیره شد');
+  }
+
   async function signOut() {
     if (!supabase || cloudBusy) return;
     setCloudBusy(true);
@@ -378,6 +484,43 @@ function DongoApp() {
     };
   }, []);
 
+  useEffect(() => { void loadAccount(); }, []);
+
+  function goBackInApp() {
+    if (ownerFamilyModal) { setOwnerFamilyModal(false); setStoryModal(true); return true; }
+    if (storyModal) { setStoryModal(false); return true; }
+    if (joinModal) { setJoinModal(false); return true; }
+    if (storySwitcher) { setStorySwitcher(false); return true; }
+    if (finishModal) { setFinishModal(false); return true; }
+    if (notificationsModal) { setNotificationsModal(false); return true; }
+    if (expenseDetailsModal) { setExpenseDetailsModal(false); return true; }
+    if (expenseModal) { setExpenseModal(false); return true; }
+    if (memberModal) { setMemberModal(false); return true; }
+    if (editMemberModal) { setEditMemberModal(false); return true; }
+    if (deleteStoryModal) { setDeleteStoryModal(false); return true; }
+    if (tab !== 'home') { setTab('home'); return true; }
+    if (!storiesHome) { setStoriesHome(true); return true; }
+    return false;
+  }
+
+  const canGoBackInApp = ownerFamilyModal || storyModal || joinModal || storySwitcher || finishModal || notificationsModal
+    || expenseDetailsModal || expenseModal || memberModal || editMemberModal || deleteStoryModal
+    || tab !== 'home' || !storiesHome;
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (goBackInApp()) return true;
+
+      const now = Date.now();
+      if (now - lastBackPressAt.current < 2000) return false;
+      lastBackPressAt.current = now;
+      showToast('برای خروج، یک‌بار دیگر دکمه بازگشت گوشی را بزن.');
+      return true;
+    });
+    return () => subscription.remove();
+  }, [ownerFamilyModal, storyModal, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, tab, storiesHome]);
+
   useEffect(() => {
     if (!storyId) return;
     setStories((current) => current.map((story) => story.id === storyId
@@ -399,24 +542,75 @@ function DongoApp() {
     setCategory('food');
     setPayerId(currentMember?.id ?? members[0]?.id ?? '');
     setSelectedIds(members.map((member) => member.id));
+    setSelectedPersonIds(members.map((member) => `${member.id}::0`));
     setSplitMode('equal');
     setShareInputs({});
     setItemLabels({});
     setExpenseModal(true);
   }
 
-  async function createStory() {
+  function startStoryCreation() {
     const name = newStoryName.trim();
     if (!name || cloudBusy) return;
-    const ownerUnits = Math.max(1, Number(newOwnerUnits || 1));
-    setCloudBusy(true);
-    try {
-      const nextStoryId = await createOnlineStory(name, newStoryTemplate, ownerUnits);
-      await syncFromCloud(nextStoryId, true);
+    const ownerUnits = Math.min(12, Math.max(1, Number(newOwnerUnits || 1)));
+    if (ownerUnits > 1) {
+      setOwnerFamilyNames(Array.from({ length: ownerUnits - 1 }, (_, index) => ownerFamilyNames[index] ?? ''));
       setStoryModal(false);
+      setOwnerFamilyModal(true);
+      return;
+    }
+    void createStory([]);
+  }
+
+  async function createStory(familyNames: string[]) {
+    const name = newStoryName.trim();
+    if (!name || cloudBusy) return;
+    const ownerUnits = Math.min(12, Math.max(1, Number(newOwnerUnits || 1)));
+    const cleanFamilyNames = familyNames.map((item) => item.trim());
+    if (ownerUnits > 1 && (cleanFamilyNames.length !== ownerUnits - 1 || cleanFamilyNames.some((item) => item.length < 2))) {
+      showToast('نام همه اعضای خانواده را وارد کن.');
+      return;
+    }
+
+    if (isLocalWebPreview) {
+      const previewId = `local-story-${Date.now()}`;
+      const ownerDisplayName = accountName.trim() || 'من';
+      const previewStory: Story = {
+        id: previewId,
+        name,
+        template: newStoryTemplate,
+        members: [{ id: `${previewId}-owner`, name: ownerDisplayName, color: AVATAR_COLORS[0], isMe: true, shareUnits: ownerUnits, kind: 'registered', userId: 'local-preview-user', householdMembers: [ownerDisplayName, ...cleanFamilyNames] }],
+        expenses: [],
+        payments: [],
+        status: 'active',
+        ownerId: 'local-preview-user',
+        inviteCode: 'TESTLOCAL',
+      };
+      setStories((current) => [previewStory, ...current]);
+      hydrateActiveStory(previewStory);
+      setStoriesHome(false);
+      setTab('home');
+      setStoryModal(false);
+      setOwnerFamilyModal(false);
       setStorySwitcher(false);
       setNewStoryName('');
       setNewOwnerUnits('1');
+      setOwnerFamilyNames([]);
+      showToast('ماجرای آزمایشی ساخته شد؛ پیامکی ارسال نمی‌شود.');
+      return;
+    }
+
+    setCloudBusy(true);
+    try {
+      const ownerName = accountName.trim() || 'من';
+      const nextStoryId = await createOnlineStory(name, newStoryTemplate, ownerUnits, [ownerName, ...cleanFamilyNames]);
+      await syncFromCloud(nextStoryId, true);
+      setStoryModal(false);
+      setOwnerFamilyModal(false);
+      setStorySwitcher(false);
+      setNewStoryName('');
+      setNewOwnerUnits('1');
+      setOwnerFamilyNames([]);
       showToast('ماجرای آنلاین جدیدت آماده‌ست');
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'ساخت ماجرا ناموفق بود');
@@ -429,6 +623,8 @@ function DongoApp() {
     setNewStoryName('');
     setNewOwnerUnits('1');
     setNewStoryTemplate('restaurant');
+    setOwnerFamilyNames([]);
+    setOwnerFamilyModal(false);
     setStorySwitcher(false);
     setStoryModal(true);
   }
@@ -474,6 +670,13 @@ function DongoApp() {
     void Haptics.selectionAsync();
   }
 
+  function toggleExpensePerson(id: string) {
+    setSelectedPersonIds((current) => (
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    ));
+    void Haptics.selectionAsync();
+  }
+
   function showToast(message: string) {
     setToast(message);
     setTimeout(() => setToast(''), 2800);
@@ -509,16 +712,38 @@ function DongoApp() {
   async function addExpense() {
     if (!isExpenseValid || !storyId || cloudBusy) return;
     const allocations = splitMode === 'equal'
-      ? allocateByWeight(numericAmount, members
-          .filter((member) => selectedIds.includes(member.id))
-          .map((member) => ({ memberId: member.id, weight: Math.max(1, member.shareUnits ?? 1) })))
-      : members
-          .map((member) => ({
+      ? (() => {
+          const perPerson = allocateByWeight(numericAmount, expensePeople
+            .filter((person) => selectedPersonIds.includes(person.id))
+            .map((person) => ({ memberId: person.id, weight: 1 })));
+          return members.flatMap((member) => {
+            const people = perPerson.filter((allocation) => allocation.memberId.startsWith(`${member.id}::`));
+            if (!people.length) return [];
+            return [{
+              memberId: member.id,
+              amount: people.reduce((sum, person) => sum + person.amount, 0),
+              label: people.map((person) => expensePeople.find((item) => item.id === person.memberId)?.name).filter(Boolean).join('، '),
+            }];
+          });
+        })()
+      : members.flatMap((member) => {
+          const people = expensePeople
+            .filter((person) => person.memberId === member.id)
+            .map((person) => ({
+              ...person,
+              amount: Number(shareInputs[person.id] || 0),
+              item: itemLabels[person.id]?.trim(),
+            }))
+            .filter((person) => person.amount > 0);
+          if (!people.length) return [];
+          return [{
             memberId: member.id,
-            amount: Number(shareInputs[member.id] || 0),
-            label: splitMode === 'itemized' ? itemLabels[member.id]?.trim() : undefined,
-          }))
-          .filter((allocation) => allocation.amount > 0);
+            amount: people.reduce((sum, person) => sum + person.amount, 0),
+            label: people.map((person) => splitMode === 'itemized' && person.item
+              ? `${person.name}: ${person.item}`
+              : person.name).join('، '),
+          }];
+        });
     const nextExpense: Expense = {
       id: '',
       title: title.trim(),
@@ -527,7 +752,19 @@ function DongoApp() {
       allocations,
       createdAt: 'همین حالا',
       category,
+      participantPersonCount: splitMode === 'equal'
+        ? selectedPersonIds.length
+        : expensePeople.filter((person) => Number(shareInputs[person.id] || 0) > 0).length,
     };
+
+    if (isLocalWebPreview) {
+      const localExpense = { ...nextExpense, id: `local-expense-${Date.now()}` };
+      setExpenses((current) => [localExpense, ...current]);
+      setExpenseModal(false);
+      setTab('home');
+      showToast('هزینه آزمایشی با اعضای انتخاب‌شده ثبت شد.');
+      return;
+    }
     setCloudBusy(true);
     try {
       await createOnlineExpense(storyId, nextExpense);
@@ -545,14 +782,38 @@ function DongoApp() {
 
   async function addMember() {
     const name = newMemberName.trim();
-    if (!name || !storyId || cloudBusy) return;
-    const shareUnits = Math.max(1, Number(newMemberUnits || 1));
+    if (name.length < 2 || !storyId || cloudBusy) return;
+    const shareUnits = Math.min(12, Math.max(1, Number(newMemberUnits || 1)));
+    const additionalNames = newHouseholdNameInputs.map((item) => item.trim());
+    if (additionalNames.length !== Math.max(0, shareUnits - 1) || additionalNames.some((item) => item.length < 2)) {
+      showToast('نام همه اعضای خانواده را وارد کن.');
+      return;
+    }
+    const householdMembers = [name, ...additionalNames];
+    if (isLocalWebPreview) {
+      const localMember: Member = {
+        id: `local-member-${Date.now()}`,
+        name,
+        color: AVATAR_COLORS[members.length % AVATAR_COLORS.length],
+        shareUnits,
+        kind: 'guest',
+        householdMembers,
+      };
+      setMembers((current) => [...current, localMember]);
+      setNewMemberName('');
+      setNewMemberUnits('1');
+      setNewHouseholdNameInputs([]);
+      setMemberModal(false);
+      showToast(`${name} با اعضای خانواده اضافه شد`);
+      return;
+    }
     setCloudBusy(true);
     try {
-      await addOnlineGuest(storyId, name, shareUnits);
+      await addOnlineGuest(storyId, name, shareUnits, householdMembers);
       await syncFromCloud(storyId);
       setNewMemberName('');
       setNewMemberUnits('1');
+      setNewHouseholdNameInputs([]);
       setMemberModal(false);
       showToast(`${name} به‌عنوان عضو بدون اپ اضافه شد`);
     } catch (error) {
@@ -562,21 +823,72 @@ function DongoApp() {
     }
   }
 
+  function changeNewMemberUnits(value: string) {
+    const normalized = normalizeDigits(value).replace(/^0+/, '');
+    const shareUnits = normalized ? Math.min(12, Math.max(1, Number(normalized))) : 0;
+    setNewMemberUnits(shareUnits ? String(shareUnits) : '');
+    setNewHouseholdNameInputs((current) => Array.from(
+      { length: Math.max(0, shareUnits - 1) },
+      (_, index) => current[index] ?? '',
+    ));
+  }
+
+  function openNewMemberModal() {
+    setNewMemberName('');
+    setNewMemberUnits('1');
+    setNewHouseholdNameInputs([]);
+    setMemberMode(canManageGuests ? 'guest' : 'invite');
+    setMemberModal(true);
+  }
+
   function openMemberEditor(member: Member) {
-    if (!canManageGuests || storyCompleted) return;
+    if ((!canManageGuests && !member.isMe) || storyCompleted) return;
+    const shareUnits = Math.max(1, member.shareUnits ?? 1);
+    const fixedHeadName = member.householdMembers?.[0] || (member.isMe ? accountName.trim() || member.name : member.name);
+    const savedAdditionalNames = member.householdMembers?.[0] === fixedHeadName
+      ? member.householdMembers.slice(1)
+      : (member.householdMembers ?? []);
     setEditingMember(member);
     setEditMemberName(member.name);
-    setEditMemberUnits(String(member.shareUnits ?? 1));
+    setEditMemberUnits(String(shareUnits));
+    setEditHouseholdNameInputs(Array.from({ length: Math.max(0, shareUnits - 1) }, (_, index) => savedAdditionalNames[index] ?? ''));
     setEditMemberModal(true);
+  }
+
+  function changeEditMemberUnits(value: string) {
+    const normalized = normalizeDigits(value).replace(/^0+/, '');
+    const shareUnits = normalized ? Math.min(12, Math.max(1, Number(normalized))) : 0;
+    setEditMemberUnits(shareUnits ? String(shareUnits) : '');
+    setEditHouseholdNameInputs((current) => Array.from(
+      { length: Math.max(0, shareUnits - 1) },
+      (_, index) => current[index] ?? '',
+    ));
   }
 
   async function saveMemberEdit() {
     if (!editingMember || !storyId || cloudBusy) return;
     const name = editMemberName.trim();
-    if (editingMember.kind === 'guest' && !name) return;
+    if (editingMember.kind === 'guest' && name.length < 2) return;
+    const shareUnits = Math.min(12, Math.max(1, Number(editMemberUnits || 1)));
+    const editableNames = editHouseholdNameInputs.map((item) => item.trim());
+    if (editableNames.length !== Math.max(0, shareUnits - 1) || editableNames.some((item) => item.length < 2)) {
+      showToast('نام همه اعضای خانواده را وارد کن.');
+      return;
+    }
+    const fixedHeadName = editingMember.householdMembers?.[0] || accountName.trim() || editingMember.name;
+    const householdMembers = [editingMember.kind === 'guest' ? name : fixedHeadName, ...editableNames];
+    if (isLocalWebPreview) {
+      setMembers((current) => current.map((member) => member.id === editingMember.id
+        ? { ...member, name: name || member.name, shareUnits, householdMembers }
+        : member));
+      setEditMemberModal(false);
+      setEditingMember(null);
+      showToast('اطلاعات حساب و افراد آن ویرایش شد');
+      return;
+    }
     setCloudBusy(true);
     try {
-      await updateOnlineMember(editingMember.id, name, Math.min(100, Math.max(1, Number(editMemberUnits || 1))));
+      await updateOnlineMember(editingMember.id, name, shareUnits, householdMembers);
       await syncFromCloud(storyId);
       setEditMemberModal(false);
       setEditingMember(null);
@@ -614,13 +926,16 @@ function DongoApp() {
 
   async function joinStory() {
     const code = joinCode.trim().toUpperCase();
-    if (!code || cloudBusy) return;
+    const shareUnits = Math.min(12, Math.max(1, Number(joinUnits || 1)));
+    const additionalNames = joinHouseholdNameInputs.slice(0, shareUnits - 1).map((name) => name.trim());
+    if (!code || cloudBusy || additionalNames.some((name) => name.length < 2)) return;
     setCloudBusy(true);
     try {
-      const joinedStoryId = await joinOnlineStory(code, Math.max(1, Number(joinUnits || 1)));
+      const joinedStoryId = await joinOnlineStory(code, shareUnits, [accountName.trim() || 'من', ...additionalNames]);
       await syncFromCloud(joinedStoryId, true);
       setJoinCode('');
       setJoinUnits('1');
+      setJoinHouseholdNameInputs([]);
       setJoinModal(false);
       showToast('با موفقیت به ماجرا پیوستی');
     } catch (error) {
@@ -643,7 +958,7 @@ function DongoApp() {
 
   function renderExpense(expense: Expense) {
     const payer = memberById(expense.payerId);
-    const participantCount = expense.allocations?.length ?? expense.participantIds?.length ?? 0;
+    const participantCount = expense.participantPersonCount ?? expense.allocations?.length ?? expense.participantIds?.length ?? 0;
     return (
       <Pressable
         key={expense.id}
@@ -695,7 +1010,6 @@ function DongoApp() {
         <View style={styles.dashboardHero}>
           <View style={styles.dashboardHeroIcon}><WalletCards size={27} color={C.purple} /></View>
           <View style={styles.dashboardHeroCopy}><AppText style={styles.dashboardEyebrow}>همه‌چیز یک‌جا</AppText><AppText style={styles.dashboardTitle}>ماجراهای من</AppText><AppText style={styles.dashboardText}>ماجراهای در جریان را ادامه بده یا حساب ماجراهای قبلی را مرور کن.</AppText></View>
-          <Pressable accessibilityRole="button" accessibilityLabel="خروج از حساب" disabled={cloudBusy} onPress={() => void signOut()} style={({ pressed }) => [styles.logoutButton, pressed && styles.pressed, cloudBusy && { opacity: 0.65 }]}><LogOut size={17} color={C.muted} /></Pressable>
         </View>
         <View style={styles.dashboardActions}>
           <Pressable accessibilityRole="button" onPress={openNewStory} style={styles.dashboardNewStory}><Plus size={19} color="#FFFFFF" /><AppText style={styles.dashboardNewStoryText}>ساخت ماجرای جدید</AppText></Pressable>
@@ -708,6 +1022,30 @@ function DongoApp() {
         <View style={styles.dashboardSectionHead}><View style={styles.completedCount}><AppText style={styles.completedCountText}>{faNumber.format(completed.length)}</AppText></View><AppText style={styles.sectionTitle}>ماجراهای تمام‌شده</AppText></View>
         <View style={styles.dashboardStoryList}>{completed.length ? completed.map(renderStoryCard) : <View style={styles.inlineEmpty}><AppText style={styles.inlineEmptyTitle}>هنوز ماجرایی تمام نشده</AppText><AppText style={styles.inlineEmptyText}>بعد از تسویه، ماجراهای بسته‌شده اینجا می‌مانند.</AppText></View>}</View>
       </>
+    );
+  }
+
+  function renderAccount() {
+    return (
+      <View style={styles.accountPage}>
+        <View style={styles.accountHero}>
+          <View style={styles.accountHeroIcon}><UserRound size={30} color="#FFFFFF" /></View>
+          <View style={styles.accountHeroCopy}><AppText style={styles.accountTitle}>حساب کاربری</AppText><AppText style={styles.accountSubtitle}>اطلاعاتت فقط برای تجربه بهتر و تسویه دنگ‌ها استفاده می‌شود.</AppText></View>
+        </View>
+        {accountLoading ? <View style={styles.accountCard}><AppText style={styles.accountHint}>اطلاعات حساب در حال بارگذاری است…</AppText></View> : <View style={styles.accountCard}>
+          <AppText style={styles.accountSectionTitle}>اطلاعات من</AppText>
+          <AppText style={styles.accountLabel}>نام و نام خانوادگی <AppText style={styles.requiredMark}>*</AppText></AppText>
+          <TextInput accessibilityLabel="نام و نام خانوادگی حساب کاربری" value={accountName} onChangeText={setAccountName} placeholder="مثلاً امیر رضایی" placeholderTextColor={C.faint} style={styles.accountInput} textAlign="right" />
+          <AppText style={styles.accountLabel}>شماره موبایل</AppText>
+          <View style={styles.readonlyField}><AppText style={styles.readonlyValue}>{accountPhone || '—'}</AppText><AppText style={styles.readonlyHint}>برای امنیت، تغییر شماره از همین بخش انجام نمی‌شود.</AppText></View>
+          <AppText style={styles.accountLabel}>شماره کارت برای دریافت دنگ <AppText style={styles.optionalMark}>اختیاری</AppText></AppText>
+          <TextInput accessibilityLabel="شماره کارت دریافت دنگ" value={accountCardNumber} onChangeText={(value) => setAccountCardNumber(normalizeDigits(value).slice(0, 16))} placeholder="۱۶ رقم بدون فاصله" placeholderTextColor={C.faint} keyboardType="number-pad" style={[styles.accountInput, styles.accountCardInput]} textAlign="center" />
+          <AppText style={styles.accountHint}>رمز، CVV2 و تاریخ انقضا دریافت یا ذخیره نمی‌شوند.</AppText>
+          {accountError ? <AppText style={styles.accountError}>{accountError}</AppText> : null}
+          <Pressable accessibilityRole="button" disabled={accountSaving} onPress={() => void saveAccount()} style={({ pressed }) => [styles.accountSaveButton, pressed && styles.pressed, accountSaving && styles.saveButtonDisabled]}><AppText style={styles.accountSaveText}>{accountSaving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}</AppText></Pressable>
+        </View>}
+        <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => void signOut()} style={({ pressed }) => [styles.accountLogoutButton, pressed && styles.pressed, cloudBusy && { opacity: 0.65 }]}><LogOut size={18} color={C.debt} /><AppText style={styles.accountLogoutText}>خروج از حساب کاربری</AppText></Pressable>
+      </View>
     );
   }
 
@@ -742,13 +1080,13 @@ function DongoApp() {
             <View style={[styles.statIcon, { backgroundColor: C.mint }]}><Users size={20} color="#FFFFFF" /></View>
             <View style={styles.statCopy}>
               <AppText style={styles.statLabel}>اعضا</AppText>
-              <AppText style={styles.statValue}>{faNumber.format(totalShareUnits)} نفر · {faNumber.format(members.length)} حساب</AppText>
+              <AppText style={styles.statValue}>{faNumber.format(totalShareUnits)} نفر و {faNumber.format(members.length)} حساب</AppText>
             </View>
           </View>
         </View>
 
         <View style={styles.sectionHead}>
-          {!storyCompleted ? <Pressable accessibilityRole="button" onPress={() => { setMemberMode(canManageGuests ? 'guest' : 'invite'); setMemberModal(true); }} style={styles.textButton}>
+          {!storyCompleted ? <Pressable accessibilityRole="button" onPress={openNewMemberModal} style={styles.textButton}>
             <Plus size={15} color={C.purple} /><AppText style={styles.textButtonLabel}>افزودن نفر</AppText>
           </Pressable> : <View style={styles.completedBadge}><Check size={11} color={C.mintDark} /><AppText style={styles.completedBadgeText}>تمام‌شده</AppText></View>}
           <View style={styles.sectionTitleWrap}>
@@ -761,11 +1099,11 @@ function DongoApp() {
           {members.map((member) => {
             const balance = balances.find((item) => item.memberId === member.id)?.amount ?? 0;
             return (
-              <Pressable key={member.id} accessibilityRole="button" accessibilityLabel={`ویرایش ${member.name}`} accessibilityState={{ disabled: !canManageGuests || storyCompleted }} onPress={() => openMemberEditor(member)} style={({ pressed }) => [styles.memberCard, pressed && canManageGuests && !storyCompleted && styles.pressed]}>
+              <Pressable key={member.id} accessibilityRole="button" accessibilityLabel={`ویرایش ${member.name}`} accessibilityState={{ disabled: (!canManageGuests && !member.isMe) || storyCompleted }} onPress={() => openMemberEditor(member)} style={({ pressed }) => [styles.memberCard, pressed && (canManageGuests || member.isMe) && !storyCompleted && styles.pressed]}>
                 <Avatar member={member} size={48} />
                 <View style={styles.memberCardCopy}>
                   <View style={styles.nameRow}>
-                    {canManageGuests && !storyCompleted && <Pencil size={12} color={C.faint} />}
+                    {(canManageGuests || member.isMe) && !storyCompleted && <Pencil size={12} color={C.faint} />}
                     {member.isMe && <View style={styles.meBadge}><AppText style={styles.meText}>من</AppText></View>}
                     <AppText style={styles.memberCardName}>{member.name}</AppText>
                   </View>
@@ -773,6 +1111,7 @@ function DongoApp() {
                     {balance >= 0 ? 'طلبکار' : 'بدهکار'} · {faNumber.format(Math.abs(balance))}
                   </AppText>
                   <View style={styles.memberUnitsBadge}><Users size={11} color={C.purple} /><AppText style={styles.memberUnitsText}>{faNumber.format(member.shareUnits ?? 1)} سهم</AppText></View>
+                  {(member.shareUnits ?? 1) > 1 && <AppText numberOfLines={2} style={styles.householdNamesPreview}>{member.householdMembers?.length ? member.householdMembers.join('، ') : 'برای ثبت اسم افراد، کارت را بزن'}</AppText>}
                 </View>
               </Pressable>
             );
@@ -941,7 +1280,7 @@ function DongoApp() {
         </ScrollView>}
 
         <Modal visible={storyModal} animationType="slide" transparent onRequestClose={() => setStoryModal(false)}>
-          <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
             <View style={styles.storySheet} accessibilityViewIsModal>
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeader}>
@@ -952,7 +1291,7 @@ function DongoApp() {
               <View style={styles.storyForm}>
                 <AppText style={styles.formLabel}>اسم این ماجرا چیه؟</AppText>
                 <TextInput style={styles.formInput} value={newStoryName} onChangeText={setNewStoryName} placeholder="مثلاً شام جمعه" placeholderTextColor={C.faint} textAlign="right" autoFocus />
-                <View style={styles.ownerUnitsRow}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب من هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ مثلاً خانواده ۴ نفره = ۴ سهم</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits} onChangeText={(value) => setNewOwnerUnits(normalizeDigits(value).replace(/^0+/, '').slice(0, 2))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+                <View style={styles.ownerUnitsRow}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب من هستند؟</AppText><AppText style={styles.formHelper}>خودت عضو اصلی هستی؛ نام بقیه را در مرحله بعد می‌پرسیم.</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits} onChangeText={(value) => setNewOwnerUnits(String(Math.min(12, Number(normalizeDigits(value).replace(/^0+/, '') || 0)) || ''))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
                 <AppText style={styles.formLabel}>چه جور ماجراییه؟</AppText>
                 <View style={styles.storyTemplateGrid}>
                   {STORY_TEMPLATES.map((template) => {
@@ -961,22 +1300,36 @@ function DongoApp() {
                   })}
                 </View>
                 <AppText style={styles.storyHelper}>نوع ماجرا فقط برای ظاهر و پیشنهادهای اولیه است؛ محاسبه دنگ‌ها همیشه یکسان انجام می‌شود.</AppText>
-                <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={createStory} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
+                <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={startStoryCreation} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
               </View>
             </View>
           </KeyboardAvoidingView>
         </Modal>
+        <Modal visible={ownerFamilyModal} animationType="fade" transparent onRequestClose={() => { setOwnerFamilyModal(false); setStoryModal(true); }}>
+          <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+            <View style={styles.familySetupDialog} accessibilityViewIsModal>
+              <View style={styles.familySetupHeader}><View style={styles.dialogIcon}><Users size={25} color={C.purple} /></View><View style={styles.familySetupCopy}><AppText style={styles.familyStepLabel}>مرحله ۲ از ۲</AppText><AppText style={styles.dialogTitle}>اعضای حساب تو</AppText><AppText style={styles.dialogTextCompact}>اسم‌ها باعث می‌شوند موقع ثبت خرج دقیقاً افراد حاضر را انتخاب کنی.</AppText></View></View>
+              <View style={styles.familyHeadRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.familyHeadCopy}><AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText><AppText style={styles.familyHeadName}>{accountName.trim() || 'من (دارنده حساب)'}</AppText></View></View>
+              <ScrollView style={styles.familyInputsScroll} contentContainerStyle={styles.familyInputsContent} keyboardShouldPersistTaps="handled">
+                {ownerFamilyNames.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput autoFocus={index === 0} value={value} onChangeText={(text) => setOwnerFamilyNames((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
+              </ScrollView>
+              <AppText style={styles.familySetupHint}>بعداً هم می‌توانی نام‌ها را ویرایش کنی؛ تسویه نهایی همیشه با حساب سرپرست انجام می‌شود.</AppText>
+              <View style={styles.dialogActions}><Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => { setOwnerFamilyModal(false); setStoryModal(true); }}><AppText style={styles.dialogCancelText}>مرحله قبل</AppText></Pressable><Pressable accessibilityRole="button" disabled={ownerFamilyNames.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (ownerFamilyNames.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={() => void createStory(ownerFamilyNames)}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>تأیید و ساخت ماجرا</AppText></Pressable></View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
         <Modal visible={joinModal} animationType="fade" transparent onRequestClose={() => setJoinModal(false)}>
-          <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
             <View style={styles.dialog} accessibilityViewIsModal>
               <View style={styles.dialogIcon}><UserPlus size={26} color={C.purple} /></View>
               <AppText style={styles.dialogTitle}>پیوستن به ماجرا</AppText>
               <AppText style={styles.dialogText}>کدی را که سازنده ماجرا برایت فرستاده وارد کن.</AppText>
               <TextInput autoCapitalize="characters" autoCorrect={false} maxLength={8} style={[styles.formInput, styles.joinCodeInput]} value={joinCode} onChangeText={(value) => setJoinCode(value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())} placeholder="کد ۸ کاراکتری" placeholderTextColor={C.faint} textAlign="center" autoFocus />
-              <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب تو هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ خانواده ۳ نفره = ۳ سهم</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits} onChangeText={(value) => setJoinUnits(normalizeDigits(value).replace(/^0+/, '').slice(0, 2))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+              <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب تو هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits} onChangeText={(value) => { const normalized = normalizeDigits(value).replace(/^0+/, '').slice(0, 2); const count = Math.min(12, Math.max(1, Number(normalized || 1))); setJoinUnits(normalized); setJoinHouseholdNameInputs((current) => Array.from({ length: count - 1 }, (_, index) => current[index] ?? '')); }} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+              {joinHouseholdNameInputs.map((value, index) => <View key={`join-home-${index}`} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setJoinHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
               <View style={styles.dialogActions}>
                 <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setJoinModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-                <Pressable accessibilityRole="button" disabled={!joinCode.trim() || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><UserPlus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>پیوستن</AppText></Pressable>
+                <Pressable accessibilityRole="button" disabled={!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><UserPlus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>پیوستن</AppText></Pressable>
               </View>
             </View>
           </KeyboardAvoidingView>
@@ -989,7 +1342,11 @@ function DongoApp() {
     <SafeAreaView style={styles.safeArea}>
       <StatusBar style="dark" />
       <View style={styles.topBar}>
-        <Pressable accessibilityRole="button" accessibilityLabel={`اعلان‌ها، ${faNumber.format(notificationItems.length)} مورد`} onPress={() => setNotificationsModal(true)} style={styles.iconButton}><Bell size={21} color={C.ink} />{notificationItems.length > 0 && <View style={styles.notificationBadge}><AppText style={styles.notificationBadgeText}>{faNumber.format(notificationItems.length)}</AppText></View>}</Pressable>
+        {canGoBackInApp ? (
+          <Pressable accessibilityRole="button" accessibilityLabel="بازگشت به صفحه قبل" onPress={goBackInApp} style={styles.iconButton}><ArrowRight size={21} color={C.ink} /></Pressable>
+        ) : (
+          <Pressable accessibilityRole="button" accessibilityLabel={`اعلان‌ها، ${faNumber.format(notificationItems.length)} مورد`} onPress={() => setNotificationsModal(true)} style={styles.iconButton}><Bell size={21} color={C.ink} />{notificationItems.length > 0 && <View style={styles.notificationBadge}><AppText style={styles.notificationBadgeText}>{faNumber.format(notificationItems.length)}</AppText></View>}</Pressable>
+        )}
         <View style={styles.brand}>
           <View style={styles.brandCopy}><AppText style={styles.brandName}>دنگودونگ</AppText><AppText style={styles.brandTagline}>خرج کن، راحت تسویه کن</AppText></View>
           <View style={styles.brandMark}><WalletCards size={23} color="#FFFFFF" /></View>
@@ -1003,6 +1360,7 @@ function DongoApp() {
             {tab === 'home' && renderHome()}
             {tab === 'expenses' && renderExpenses()}
             {tab === 'settlement' && renderSettlement()}
+            {tab === 'account' && renderAccount()}
           </>
         )}
         <View style={styles.scrollEnd} />
@@ -1031,6 +1389,10 @@ function DongoApp() {
         <Pressable accessibilityRole="tab" accessibilityState={{ selected: !storiesHome && tab === 'settlement' }} onPress={() => { setStoriesHome(false); setTab('settlement'); }} style={styles.navItem}>
           <View style={[styles.navIconWrap, tab === 'settlement' && styles.navIconWrapActive]}><HandCoins size={22} color={tab === 'settlement' ? C.purple : C.faint} /></View>
           <AppText style={[styles.navLabel, tab === 'settlement' && styles.navLabelActive]}>تسویه</AppText>
+        </Pressable>
+        <Pressable accessibilityRole="tab" accessibilityState={{ selected: !storiesHome && tab === 'account' }} onPress={() => { setStoriesHome(false); setTab('account'); void loadAccount(); }} style={styles.navItem}>
+          <View style={[styles.navIconWrap, tab === 'account' && styles.navIconWrapActive]}><UserRound size={21} color={tab === 'account' ? C.purple : C.faint} /></View>
+          <AppText style={[styles.navLabel, tab === 'account' && styles.navLabelActive]}>حساب من</AppText>
         </Pressable>
       </View>
 
@@ -1112,7 +1474,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={storyModal} animationType="slide" transparent onRequestClose={() => setStoryModal(false)}>
-        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.storySheet} accessibilityViewIsModal>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
@@ -1123,7 +1485,7 @@ function DongoApp() {
             <View style={styles.storyForm}>
               <AppText style={styles.formLabel}>اسم این ماجرا چیه؟</AppText>
               <TextInput style={styles.formInput} value={newStoryName} onChangeText={setNewStoryName} placeholder="مثلاً شام جمعه" placeholderTextColor={C.faint} textAlign="right" autoFocus />
-              <View style={styles.ownerUnitsRow}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب من هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ مثلاً خانواده ۴ نفره = ۴ سهم</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits} onChangeText={(value) => setNewOwnerUnits(normalizeDigits(value).replace(/^0+/, '').slice(0, 2))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+              <View style={styles.ownerUnitsRow}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب من هستند؟</AppText><AppText style={styles.formHelper}>خودت عضو اصلی هستی؛ نام بقیه را در مرحله بعد می‌پرسیم.</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits} onChangeText={(value) => setNewOwnerUnits(String(Math.min(12, Number(normalizeDigits(value).replace(/^0+/, '') || 0)) || ''))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
               <AppText style={styles.formLabel}>چه جور ماجراییه؟</AppText>
               <View style={styles.storyTemplateGrid}>
                 {STORY_TEMPLATES.map((template) => {
@@ -1132,8 +1494,22 @@ function DongoApp() {
                 })}
               </View>
               <AppText style={styles.storyHelper}>نوع ماجرا فقط برای ظاهر و پیشنهادهای اولیه است؛ محاسبه دنگ‌ها همیشه یکسان انجام می‌شود.</AppText>
-              <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={createStory} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
+              <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={startStoryCreation} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
             </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      <Modal visible={ownerFamilyModal} animationType="fade" transparent onRequestClose={() => { setOwnerFamilyModal(false); setStoryModal(true); }}>
+        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <View style={styles.familySetupDialog} accessibilityViewIsModal>
+            <View style={styles.familySetupHeader}><View style={styles.dialogIcon}><Users size={25} color={C.purple} /></View><View style={styles.familySetupCopy}><AppText style={styles.familyStepLabel}>مرحله ۲ از ۲</AppText><AppText style={styles.dialogTitle}>اعضای حساب تو</AppText><AppText style={styles.dialogTextCompact}>اسم‌ها باعث می‌شوند موقع ثبت خرج دقیقاً افراد حاضر را انتخاب کنی.</AppText></View></View>
+            <View style={styles.familyHeadRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.familyHeadCopy}><AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText><AppText style={styles.familyHeadName}>{accountName.trim() || 'من (دارنده حساب)'}</AppText></View></View>
+            <ScrollView style={styles.familyInputsScroll} contentContainerStyle={styles.familyInputsContent} keyboardShouldPersistTaps="handled">
+              {ownerFamilyNames.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput autoFocus={index === 0} value={value} onChangeText={(text) => setOwnerFamilyNames((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
+            </ScrollView>
+            <AppText style={styles.familySetupHint}>بعداً هم می‌توانی نام‌ها را ویرایش کنی؛ تسویه نهایی همیشه با حساب سرپرست انجام می‌شود.</AppText>
+            <View style={styles.dialogActions}><Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => { setOwnerFamilyModal(false); setStoryModal(true); }}><AppText style={styles.dialogCancelText}>مرحله قبل</AppText></Pressable><Pressable accessibilityRole="button" disabled={ownerFamilyNames.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (ownerFamilyNames.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={() => void createStory(ownerFamilyNames)}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>تأیید و ساخت ماجرا</AppText></Pressable></View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -1174,23 +1550,24 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={editMemberModal} animationType="fade" transparent onRequestClose={() => setEditMemberModal(false)}>
-        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Pencil size={24} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>ویرایش عضو</AppText>
             <AppText style={styles.dialogText}>{editingMember?.kind === 'guest' ? 'نام حساب و تعداد نفرات نمایندگی‌شده را تغییر بده.' : 'نام این عضو از پروفایل خودش گرفته می‌شود؛ تعداد نفرات حساب را می‌توانی تغییر بدهی.'}</AppText>
             <TextInput editable={editingMember?.kind === 'guest'} style={[styles.formInput, editingMember?.kind !== 'guest' && styles.readonlyInput]} value={editMemberName} onChangeText={setEditMemberName} placeholder="نام عضو" placeholderTextColor={C.faint} textAlign="right" />
-            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>تعداد نفرات این حساب</AppText><AppText style={styles.formHelper}>مبنای تقسیم مساوی هزینه‌های بعدی</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={editMemberUnits} onChangeText={(value) => setEditMemberUnits(normalizeDigits(value).replace(/^0+/, '').slice(0, 3))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>تعداد نفرات این حساب</AppText><AppText style={styles.formHelper}>مبنای تقسیم مساوی هزینه‌های بعدی؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={editMemberUnits} onChangeText={changeEditMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+            {Number(editMemberUnits || 1) > 1 && <View style={styles.editFamilySection}><AppText style={styles.formLabelNoMargin}>اعضای این حساب</AppText><AppText style={styles.formHelper}>عضو ۱ سرپرست ثابت است؛ نام بقیه اعضا را جدا وارد کن.</AppText><View style={styles.editFamilyFixedRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.editFamilyFixedCopy}><AppText style={styles.familyInputLabel}>عضو ۱ · سرپرست</AppText><AppText style={styles.editFamilyFixedName}>{editingMember?.kind === 'guest' ? editMemberName || 'سرپرست حساب' : editingMember?.householdMembers?.[0] || accountName.trim() || editingMember?.name || 'من'}</AppText></View></View><ScrollView style={styles.editFamilyInputsScroll} contentContainerStyle={styles.editFamilyInputsContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{editHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setEditHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</ScrollView></View>}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setEditMemberModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-              <Pressable accessibilityRole="button" disabled={cloudBusy || !editMemberUnits || (editingMember?.kind === 'guest' && !editMemberName.trim())} style={[styles.dialogAdd, (cloudBusy || !editMemberUnits || (editingMember?.kind === 'guest' && !editMemberName.trim())) && styles.saveButtonDisabled]} onPress={saveMemberEdit}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>ذخیره تغییرات</AppText></Pressable>
+              <Pressable accessibilityRole="button" disabled={cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)} style={[styles.dialogAdd, (cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)) && styles.saveButtonDisabled]} onPress={saveMemberEdit}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>ذخیره تغییرات</AppText></Pressable>
             </View>
           </View>
         </KeyboardAvoidingView>
       </Modal>
 
       <Modal visible={expenseModal} animationType="slide" transparent onRequestClose={() => setExpenseModal(false)}>
-        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.sheet} accessibilityViewIsModal>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
@@ -1199,7 +1576,7 @@ function DongoApp() {
               <View style={styles.sheetSpark}><Sparkles size={20} color={C.purple} /></View>
             </View>
 
-            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetScrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetScrollContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}>
               <View style={styles.amountPanel}>
                 <AppText style={styles.amountLabel}>چقدر پرداخت شد؟</AppText>
                 <View style={styles.amountInputRow}>
@@ -1261,31 +1638,29 @@ function DongoApp() {
 
               {splitMode === 'equal' ? (
                 <>
-                  <View style={styles.splitHeader}><View style={styles.equalBadge}><AppText style={styles.equalBadgeText}>هر سهم: {formatMoney(sharePreview)}</AppText></View><View><AppText style={styles.formLabelNoMargin}>بین چه حساب‌هایی؟</AppText><AppText style={styles.formHelper}>{faNumber.format(selectedIds.length)} نماینده · {faNumber.format(selectedShareUnits)} سهم</AppText></View></View>
-                  <View style={styles.participantGrid}>
-                    {members.map((member) => {
-                      const active = selectedIds.includes(member.id);
-                      return (
-                        <Pressable key={member.id} accessibilityRole="checkbox" accessibilityState={{ checked: active }} onPress={() => toggleParticipant(member.id)} style={[styles.participant, active && styles.participantActive]}>
-                          <Avatar member={member} size={36} />
-                          <View style={styles.participantCopy}><AppText style={[styles.participantName, active && styles.participantNameActive]}>{member.isMe ? 'من' : member.name}</AppText><AppText style={styles.participantUnits}>{faNumber.format(member.shareUnits ?? 1)} نفر</AppText></View>
-                          <View style={[styles.participantCheck, active && styles.participantCheckActive]}>{active && <Check size={12} color="#FFFFFF" />}</View>
-                        </Pressable>
-                      );
-                    })}
+                  <View style={styles.splitHeader}><View style={styles.equalBadge}><AppText style={styles.equalBadgeText}>حدوداً هر نفر: {formatMoney(sharePreview)}</AppText></View><View><AppText style={styles.formLabelNoMargin}>چه کسانی در این هزینه بودند؟</AppText><AppText style={styles.formHelper}>{faNumber.format(selectedShareUnits)} نفر انتخاب شده؛ سرپرست هر حساب از ابتدا فعال است.</AppText></View></View>
+                  <View style={styles.householdAccountsList}>
+                    {members.map((member) => <View key={member.id} style={styles.householdAccountCard}>
+                      <View style={styles.householdAccountHead}><Avatar member={member} size={36} /><View style={styles.householdAccountCopy}><AppText style={styles.householdAccountName}>{member.isMe ? 'حساب من' : member.name}</AppText><AppText style={styles.householdAccountHint}>{faNumber.format(member.shareUnits ?? 1)} نفر در این حساب</AppText></View></View>
+                      <View style={styles.personNameChips}>{expensePeople.filter((person) => person.memberId === member.id).map((person) => {
+                        const active = selectedPersonIds.includes(person.id);
+                        return <Pressable key={person.id} accessibilityRole="checkbox" accessibilityState={{ checked: active }} onPress={() => toggleExpensePerson(person.id)} style={[styles.personNameChip, active && styles.personNameChipActive]}><AppText style={[styles.personNameChipText, active && styles.personNameChipTextActive]}>{person.name}</AppText>{active && <Check size={12} color="#FFFFFF" />}</Pressable>;
+                      })}</View>
+                    </View>)}
                   </View>
                 </>
               ) : (
                 <View style={styles.shareList}>
-                  {members.map((member) => (
-                    <View key={member.id} style={styles.shareRow}>
-                      <View style={styles.shareMember}><Avatar member={member} size={38} /><AppText style={styles.shareMemberName}>{member.isMe ? 'من' : member.name}</AppText></View>
+                  {members.map((member) => <View key={member.id} style={styles.householdShareGroup}>
+                    <View style={styles.householdAccountHead}><Avatar member={member} size={36} /><View style={styles.householdAccountCopy}><AppText style={styles.householdAccountName}>{member.isMe ? 'حساب من' : member.name}</AppText><AppText style={styles.householdAccountHint}>مبلغ هر فرد را جدا وارد کن</AppText></View></View>
+                    {expensePeople.filter((person) => person.memberId === member.id).map((person) => <View key={person.id} style={styles.personShareRow}>
+                      <View style={styles.personShareIdentity}><View style={styles.personMiniAvatar}><AppText style={styles.personMiniAvatarText}>{initials(person.name)}</AppText></View><AppText style={styles.personShareName}>{person.name}</AppText></View>
                       <View style={styles.shareFields}>
-                        {splitMode === 'itemized' && <TextInput value={itemLabels[member.id] ?? ''} onChangeText={(value) => setItemLabels((current) => ({ ...current, [member.id]: value }))} style={styles.itemLabelInput} placeholder="سفارش یا مورد" placeholderTextColor={C.faint} textAlign="right" />}
-                        <View style={styles.shareAmountWrap}><AppText style={styles.shareUnit}>تومان</AppText><TextInput value={shareInputs[member.id] ? faNumber.format(Number(shareInputs[member.id])) : ''} onChangeText={(value) => setShareInputs((current) => ({ ...current, [member.id]: normalizeDigits(value).replace(/^0+/, '') }))} style={styles.shareAmountInput} placeholder="۰" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="right" /></View>
+                        {splitMode === 'itemized' && <TextInput value={itemLabels[person.id] ?? ''} onChangeText={(value) => setItemLabels((current) => ({ ...current, [person.id]: value }))} style={styles.itemLabelInput} placeholder="مثلاً پاستا" placeholderTextColor={C.faint} textAlign="right" />}
+                        <View style={styles.shareAmountWrap}><AppText style={styles.shareUnit}>تومان</AppText><TextInput value={shareInputs[person.id] ? faNumber.format(Number(shareInputs[person.id])) : ''} onChangeText={(value) => setShareInputs((current) => ({ ...current, [person.id]: normalizeDigits(value).replace(/^0+/, '') }))} style={styles.shareAmountInput} placeholder="۰" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="right" /></View>
                       </View>
-                    </View>
-                  ))}
+                    </View>)}
+                  </View>)}
                   <View style={[styles.shareTotal, enteredShareTotal === numericAmount && numericAmount > 0 ? styles.shareTotalValid : styles.shareTotalInvalid]}><AppText style={styles.shareTotalLabel}>جمع سهم‌ها</AppText><AppText style={styles.shareTotalValue}>{formatMoney(enteredShareTotal)} از {formatMoney(numericAmount)}</AppText></View>
                 </View>
               )}
@@ -1302,7 +1677,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={memberModal} animationType="fade" transparent onRequestClose={() => setMemberModal(false)}>
-        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Users size={26} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>عضو جدید</AppText>
@@ -1313,11 +1688,13 @@ function DongoApp() {
             {memberMode === 'guest' ? (
               <>
                 <AppText style={styles.dialogText}>برای فرد یا خانواده‌ای که اپ ندارد یک حساب نمایندگی بساز.</AppText>
-                <TextInput style={styles.formInput} value={newMemberName} onChangeText={setNewMemberName} placeholder="نام فرد یا خانواده" placeholderTextColor={C.faint} textAlign="right" autoFocus />
-                <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>تعداد نفرات این حساب</AppText><AppText style={styles.formHelper}>مثلاً خانواده ۴ نفره = ۴ سهم</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={newMemberUnits} onChangeText={(value) => setNewMemberUnits(normalizeDigits(value).replace(/^0+/, '').slice(0, 2))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+                <AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText>
+                <TextInput accessibilityLabel="نام سرپرست حساب جدید" style={styles.formInput} value={newMemberName} onChangeText={setNewMemberName} placeholder="نام سرپرست خانواده" placeholderTextColor={C.faint} textAlign="right" autoFocus />
+                <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>تعداد نفرات این حساب</AppText><AppText style={styles.formHelper}>سرپرست هم جزو تعداد است؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={newMemberUnits} onChangeText={changeNewMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+                {Number(newMemberUnits || 1) > 1 && <View style={styles.newMemberFamilySection}><AppText style={styles.formLabelNoMargin}>اعضای دیگر خانواده</AppText><AppText style={styles.formHelper}>برای عضو ۲، ۳ و… نام جداگانه وارد کن.</AppText><ScrollView style={styles.newMemberFamilyScroll} contentContainerStyle={styles.editFamilyInputsContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{newHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setNewHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</ScrollView></View>}
                 <View style={styles.dialogActions}>
                   <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setMemberModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-                  <Pressable accessibilityRole="button" accessibilityState={{ disabled: !newMemberName.trim() || cloudBusy }} style={[styles.dialogAdd, (!newMemberName.trim() || cloudBusy) && styles.saveButtonDisabled]} disabled={!newMemberName.trim() || cloudBusy} onPress={addMember}><Plus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>افزودن مهمان</AppText></Pressable>
+                  <Pressable accessibilityRole="button" accessibilityState={{ disabled: newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy }} style={[styles.dialogAdd, (newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} disabled={newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} onPress={addMember}><Plus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>افزودن حساب</AppText></Pressable>
                 </View>
               </>
             ) : (
@@ -1336,16 +1713,17 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={joinModal} animationType="fade" transparent onRequestClose={() => setJoinModal(false)}>
-        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><UserPlus size={26} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>پیوستن به ماجرا</AppText>
             <AppText style={styles.dialogText}>کدی را که سازنده ماجرا برایت فرستاده وارد کن.</AppText>
             <TextInput autoCapitalize="characters" autoCorrect={false} maxLength={8} style={[styles.formInput, styles.joinCodeInput]} value={joinCode} onChangeText={(value) => setJoinCode(value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())} placeholder="کد ۸ کاراکتری" placeholderTextColor={C.faint} textAlign="center" autoFocus />
-            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب تو هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ خانواده ۳ نفره = ۳ سهم</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits} onChangeText={(value) => setJoinUnits(normalizeDigits(value).replace(/^0+/, '').slice(0, 2))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب تو هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits} onChangeText={(value) => { const normalized = normalizeDigits(value).replace(/^0+/, '').slice(0, 2); const count = Math.min(12, Math.max(1, Number(normalized || 1))); setJoinUnits(normalized); setJoinHouseholdNameInputs((current) => Array.from({ length: count - 1 }, (_, index) => current[index] ?? '')); }} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+            {joinHouseholdNameInputs.map((value, index) => <View key={`join-story-${index}`} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setJoinHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setJoinModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-              <Pressable accessibilityRole="button" disabled={!joinCode.trim() || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><UserPlus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>پیوستن</AppText></Pressable>
+              <Pressable accessibilityRole="button" disabled={!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><UserPlus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>پیوستن</AppText></Pressable>
             </View>
           </View>
         </KeyboardAvoidingView>
@@ -1357,7 +1735,7 @@ function DongoApp() {
 const styles = StyleSheet.create({
   defaultText: { fontFamily: F.regular, color: C.ink, writingDirection: 'rtl' },
   loading: { flex: 1, backgroundColor: C.canvas },
-  safeArea: { flex: 1, backgroundColor: C.canvas },
+  safeArea: { flex: 1, backgroundColor: C.canvas, paddingTop: Platform.OS === 'android' ? 24 : 0 },
   topBar: { height: 72, paddingHorizontal: 18, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.canvas },
   iconButton: { width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.paper, borderWidth: 1, borderColor: C.line },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -1398,6 +1776,7 @@ const styles = StyleSheet.create({
   memberBalance: { fontFamily: F.semi, fontSize: 10, marginTop: 4 },
   memberUnitsBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: C.purplePale, borderRadius: 8, paddingHorizontal: 6, paddingVertical: 3, marginTop: 5 },
   memberUnitsText: { fontFamily: F.bold, color: C.purple, fontSize: 7 },
+  householdNamesPreview: { maxWidth: 112, fontFamily: F.medium, color: C.muted, fontSize: 7, lineHeight: 13, marginTop: 5, textAlign: 'right' },
   sectionHeadSimple: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 27, marginBottom: 12 },
   seeAll: { fontFamily: F.semi, fontSize: 11, color: C.purple },
   expenseList: { gap: 10 },
@@ -1462,8 +1841,8 @@ const styles = StyleSheet.create({
   emptyMascot: { width: 120, height: 120 },
   emptyTitle: { fontFamily: F.extra, fontSize: 17 },
   emptyText: { fontFamily: F.medium, fontSize: 11, color: C.muted, marginTop: 4 },
-  scrollEnd: { height: 112 },
-  bottomNav: { position: 'absolute', left: 12, right: 12, bottom: 10, height: 78, backgroundColor: C.paper, borderRadius: 25, flexDirection: 'row-reverse', alignItems: 'center', paddingHorizontal: 7, borderWidth: 1, borderColor: C.line, shadowColor: C.ink, shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
+  scrollEnd: { height: Platform.OS === 'android' ? 142 : 112 },
+  bottomNav: { position: 'absolute', left: 12, right: 12, bottom: Platform.OS === 'android' ? 32 : 10, height: 78, backgroundColor: C.paper, borderRadius: 25, flexDirection: 'row-reverse', alignItems: 'center', paddingHorizontal: 7, borderWidth: 1, borderColor: C.line, shadowColor: C.ink, shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
   navItem: { flex: 1, minHeight: 60, alignItems: 'center', justifyContent: 'center' },
   navIconWrap: { width: 38, height: 30, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   navIconWrapActive: { backgroundColor: C.purplePale },
@@ -1477,7 +1856,7 @@ const styles = StyleSheet.create({
   toast: { position: 'absolute', bottom: 98, left: 22, right: 22, minHeight: 51, borderRadius: 18, backgroundColor: C.ink, paddingHorizontal: 14, flexDirection: 'row-reverse', alignItems: 'center', gap: 9, shadowColor: C.ink, shadowOpacity: 0.2, shadowRadius: 12, elevation: 8 },
   toastCheck: { width: 27, height: 27, borderRadius: 10, backgroundColor: C.mint, alignItems: 'center', justifyContent: 'center' },
   toastText: { flex: 1, fontFamily: F.semi, color: '#FFFFFF', fontSize: 11, textAlign: 'right' },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(28,22,48,0.45)', justifyContent: 'flex-end' },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(28,22,48,0.45)', justifyContent: 'flex-end', paddingBottom: Platform.OS === 'android' ? 26 : 0 },
   sheet: { height: '92%', backgroundColor: C.canvas, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
   sheetHandle: { width: 44, height: 5, borderRadius: 3, backgroundColor: '#D8CFDF', alignSelf: 'center', marginTop: 9 },
   sheetHeader: { minHeight: 73, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: C.line },
@@ -1530,7 +1909,7 @@ const styles = StyleSheet.create({
   saveButtonDisabled: { opacity: 0.38, shadowOpacity: 0 },
   saveButtonText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 13 },
   centeredBackdrop: { flex: 1, backgroundColor: 'rgba(28,22,48,0.45)', justifyContent: 'center', padding: 22 },
-  dialog: { backgroundColor: C.canvas, borderRadius: 28, padding: 21, alignItems: 'center' },
+  dialog: { maxHeight: '92%', backgroundColor: C.canvas, borderRadius: 28, padding: 21, alignItems: 'center' },
   dialogIcon: { width: 58, height: 58, borderRadius: 21, backgroundColor: C.purplePale, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   dialogTitle: { fontFamily: F.extra, fontSize: 19 },
   dialogText: { fontFamily: F.medium, color: C.muted, fontSize: 11, lineHeight: 20, textAlign: 'center', marginTop: 4, marginBottom: 16 },
@@ -1539,6 +1918,30 @@ const styles = StyleSheet.create({
   dialogCancelText: { fontFamily: F.bold, color: C.muted, fontSize: 12 },
   dialogAdd: { flex: 1.4, minHeight: 50, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.purple },
   dialogAddText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 12 },
+  familySetupDialog: { width: '100%', maxHeight: '88%', borderRadius: 28, backgroundColor: C.canvas, padding: 19 },
+  familySetupHeader: { flexDirection: 'row-reverse', alignItems: 'center', gap: 11 },
+  familySetupCopy: { flex: 1, alignItems: 'flex-end' },
+  familyStepLabel: { fontFamily: F.bold, color: C.purple, fontSize: 8, marginBottom: 2 },
+  familyHeadRow: { minHeight: 70, marginTop: 16, borderRadius: 18, backgroundColor: C.mintPale, borderWidth: 1, borderColor: '#BFE6D8', padding: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 9 },
+  familyHeadCopy: { flex: 1, alignItems: 'flex-end' },
+  familyMemberLabel: { fontFamily: F.semi, color: C.mintDark, fontSize: 9 },
+  familyHeadName: { fontFamily: F.extra, color: C.ink, fontSize: 13, marginTop: 3 },
+  familyFixedBadge: { minHeight: 31, borderRadius: 11, backgroundColor: C.paper, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  familyFixedText: { fontFamily: F.bold, color: C.mintDark, fontSize: 8 },
+  familyInputsScroll: { maxHeight: 305, marginTop: 11 },
+  familyInputsContent: { gap: 8, paddingBottom: 3 },
+  familyInputRow: { minHeight: 57, borderRadius: 16, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, padding: 7, flexDirection: 'row-reverse', alignItems: 'center', gap: 8 },
+  familyInputLabel: { width: 59, fontFamily: F.bold, color: C.purple, fontSize: 9, textAlign: 'right' },
+  familyNameInput: { flex: 1, minHeight: 43, borderRadius: 12, backgroundColor: C.canvas, color: C.ink, paddingHorizontal: 11, fontFamily: F.semi, fontSize: 11, writingDirection: 'rtl' },
+  familySetupHint: { fontFamily: F.medium, color: C.muted, fontSize: 8, lineHeight: 16, textAlign: 'right', marginTop: 11 },
+  editFamilySection: { width: '100%', maxHeight: 300, marginTop: 13, gap: 8, alignItems: 'stretch' },
+  editFamilyFixedRow: { minHeight: 58, borderRadius: 16, backgroundColor: C.mintPale, borderWidth: 1, borderColor: '#BFE6D8', padding: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  editFamilyFixedCopy: { flex: 1, alignItems: 'flex-end' },
+  editFamilyFixedName: { fontFamily: F.extra, color: C.ink, fontSize: 11, marginTop: 2, textAlign: 'right' },
+  editFamilyInputsScroll: { maxHeight: 180 },
+  editFamilyInputsContent: { gap: 8, paddingBottom: 2 },
+  newMemberFamilySection: { width: '100%', marginTop: 12, gap: 7, alignItems: 'stretch' },
+  newMemberFamilyScroll: { maxHeight: 175 },
   memberUnitsField: { width: '100%', minHeight: 68, borderRadius: 17, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, marginTop: 10, padding: 10, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
   memberUnitsFieldCopy: { flex: 1, alignItems: 'flex-end' },
   memberUnitsInput: { width: 58, height: 48, borderRadius: 14, backgroundColor: C.purplePale, borderWidth: 1, borderColor: '#D7CEF8', fontFamily: F.extra, color: C.purple, fontSize: 18 },
@@ -1560,7 +1963,7 @@ const styles = StyleSheet.create({
   templatePreviewItem: { width: '48.7%', minHeight: 48, borderRadius: 16, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, paddingHorizontal: 11, flexDirection: 'row-reverse', alignItems: 'center', gap: 7 },
   templateEmoji: { fontSize: 20, writingDirection: 'ltr' },
   templatePreviewText: { fontFamily: F.semi, fontSize: 10, color: C.muted },
-  storySheet: { minHeight: '66%', backgroundColor: C.canvas, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
+  storySheet: { minHeight: '64%', backgroundColor: C.canvas, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
   storyForm: { padding: 20 },
   storyTemplateGrid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 9 },
   storyTemplate: { width: '48.6%', minHeight: 64, borderRadius: 18, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, paddingHorizontal: 11, flexDirection: 'row-reverse', alignItems: 'center', gap: 8, position: 'relative' },
@@ -1581,6 +1984,25 @@ const styles = StyleSheet.create({
   splitModeButtonActive: { backgroundColor: C.purplePale, borderColor: C.purple },
   splitModeText: { fontFamily: F.semi, color: C.muted, fontSize: 10 },
   splitModeTextActive: { fontFamily: F.bold, color: C.purple },
+  personNameChips: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 7, marginTop: 10 },
+  personNameChip: { minHeight: 38, borderRadius: 14, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  personNameChipActive: { backgroundColor: C.purple, borderColor: C.purple },
+  personNameChipText: { fontFamily: F.semi, color: C.muted, fontSize: 9 },
+  personNameChipTextActive: { fontFamily: F.bold, color: '#FFFFFF' },
+  householdAccountsList: { gap: 9 },
+  householdAccountCard: { borderRadius: 19, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, padding: 11 },
+  householdAccountHead: { flexDirection: 'row-reverse', alignItems: 'center', gap: 9 },
+  householdAccountCopy: { flex: 1, alignItems: 'flex-end' },
+  householdAccountName: { fontFamily: F.bold, fontSize: 11, textAlign: 'right' },
+  householdAccountHint: { fontFamily: F.medium, color: C.muted, fontSize: 8, marginTop: 2, textAlign: 'right' },
+  householdShareGroup: { borderRadius: 20, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, padding: 11, gap: 8 },
+  personShareRow: { minHeight: 68, borderRadius: 15, backgroundColor: C.canvas, padding: 8, flexDirection: 'row-reverse', alignItems: 'center', gap: 8 },
+  personShareIdentity: { width: 86, flexDirection: 'row-reverse', alignItems: 'center', gap: 6 },
+  personMiniAvatar: { width: 31, height: 31, borderRadius: 11, backgroundColor: C.purplePale, alignItems: 'center', justifyContent: 'center' },
+  personMiniAvatarText: { fontFamily: F.extra, color: C.purple, fontSize: 11 },
+  personShareName: { flex: 1, fontFamily: F.bold, fontSize: 9, textAlign: 'right' },
+  householdNamesField: { marginTop: 13, alignItems: 'flex-end' },
+  householdNamesInput: { width: '100%', minHeight: 72, paddingTop: 12, marginTop: 8, textAlignVertical: 'top' },
   shareList: { gap: 9, marginTop: 12 },
   shareRow: { minHeight: 70, borderRadius: 19, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, padding: 10, flexDirection: 'row-reverse', alignItems: 'center', gap: 9 },
   shareMember: { width: 82, flexDirection: 'row-reverse', alignItems: 'center', gap: 7 },
@@ -1612,8 +2034,29 @@ const styles = StyleSheet.create({
   activeStoryBadgeText: { fontFamily: F.bold, color: C.mintDark, fontSize: 7 },
   newStoryFromSwitcher: { minHeight: 55, borderRadius: 18, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 15 },
   newStoryFromSwitcherText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 12 },
+  accountPage: { gap: 14 },
+  accountHero: { minHeight: 128, borderRadius: 27, backgroundColor: C.purple, padding: 19, flexDirection: 'row-reverse', alignItems: 'center', gap: 13 },
+  accountHeroIcon: { width: 64, height: 64, borderRadius: 23, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
+  accountHeroCopy: { flex: 1, alignItems: 'flex-end' },
+  accountTitle: { fontFamily: F.black, fontSize: 23, color: '#FFFFFF' },
+  accountSubtitle: { fontFamily: F.medium, color: '#E9E5FF', fontSize: 9, textAlign: 'right', lineHeight: 18, marginTop: 4 },
+  accountCard: { borderRadius: 24, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, padding: 17 },
+  accountSectionTitle: { fontFamily: F.extra, fontSize: 15, textAlign: 'right', marginBottom: 16 },
+  accountLabel: { fontFamily: F.bold, color: C.ink, fontSize: 10, textAlign: 'right', marginBottom: 7 },
+  requiredMark: { color: C.debt },
+  optionalMark: { color: C.muted, fontFamily: F.medium, fontSize: 8 },
+  accountInput: { minHeight: 54, borderRadius: 16, backgroundColor: C.canvas, borderWidth: 1, borderColor: C.line, color: C.ink, fontFamily: F.semi, fontSize: 12, paddingHorizontal: 14, marginBottom: 15, writingDirection: 'rtl' },
+  accountCardInput: { letterSpacing: 1.5, writingDirection: 'ltr' },
+  readonlyField: { minHeight: 58, borderRadius: 16, backgroundColor: '#F8F6F3', paddingHorizontal: 14, paddingVertical: 9, alignItems: 'flex-end', marginBottom: 15 },
+  readonlyValue: { fontFamily: F.bold, fontSize: 12, color: C.ink, writingDirection: 'ltr' },
+  readonlyHint: { fontFamily: F.medium, color: C.faint, fontSize: 8, marginTop: 4, textAlign: 'right' },
+  accountHint: { fontFamily: F.medium, color: C.muted, fontSize: 8, textAlign: 'right', lineHeight: 16, marginTop: -7, marginBottom: 14 },
+  accountError: { fontFamily: F.semi, color: C.debt, backgroundColor: C.debtPale, padding: 10, borderRadius: 13, fontSize: 9, textAlign: 'right', marginBottom: 11 },
+  accountSaveButton: { minHeight: 53, borderRadius: 17, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center' },
+  accountSaveText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 12 },
+  accountLogoutButton: { minHeight: 54, borderRadius: 18, borderWidth: 1, borderColor: '#F1C7CE', backgroundColor: '#FFF8F8', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  accountLogoutText: { fontFamily: F.bold, color: C.debt, fontSize: 11 },
   dashboardHero: { minHeight: 142, borderRadius: 27, backgroundColor: C.purplePale, borderWidth: 1, borderColor: '#DCD4FA', padding: 18, flexDirection: 'row-reverse', alignItems: 'center', gap: 13 },
-  logoutButton: { width: 40, height: 40, borderRadius: 14, backgroundColor: '#F8F6F3', alignItems: 'center', justifyContent: 'center' },
   dashboardHeroIcon: { width: 62, height: 62, borderRadius: 22, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-4deg' }] },
   dashboardHeroCopy: { flex: 1, alignItems: 'flex-end' },
   dashboardEyebrow: { fontFamily: F.semi, color: C.purple, fontSize: 9 },
