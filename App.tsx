@@ -40,6 +40,7 @@ import {
 } from './src/settlement';
 import { AuthGate } from './src/AuthGate';
 import { supabase } from './src/supabase';
+import { preloadExpenseInterstitial, showExpenseInterstitial } from './src/tapsellAds';
 import {
   addOnlineGuest,
   completeOnlineStory,
@@ -486,6 +487,10 @@ function DongoApp() {
 
   useEffect(() => { void loadAccount(); }, []);
 
+  useEffect(() => {
+    if (Platform.OS === 'android') void preloadExpenseInterstitial();
+  }, []);
+
   function goBackInApp() {
     if (ownerFamilyModal) { setOwnerFamilyModal(false); setStoryModal(true); return true; }
     if (storyModal) { setStoryModal(false); return true; }
@@ -773,6 +778,7 @@ function DongoApp() {
       setTab('home');
       showToast('هزینه آنلاین ثبت شد و برای همه اعضا به‌روز شد');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      showExpenseInterstitial();
     } catch (error) {
       showToast(error instanceof Error ? error.message : 'ثبت هزینه ناموفق بود');
     } finally {
