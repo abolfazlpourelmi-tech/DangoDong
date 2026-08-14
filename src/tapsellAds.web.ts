@@ -3,5 +3,9 @@ export function preloadExpenseInterstitial() {
 }
 
 export function showExpenseInterstitial() {
-  return false;
+  return Promise.resolve(false);
+}
+
+export function preloadAccountBanner() {
+  return Promise.resolve();
 }
