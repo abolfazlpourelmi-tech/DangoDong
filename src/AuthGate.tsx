@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import { isSupabaseConfigured, supabase } from './supabase';
 
-type Stage = 'phone' | 'otp' | 'profile' | 'ready';
+type Stage = 'welcome' | 'phone' | 'otp' | 'profile' | 'ready';
 
 const OTP_EXPIRY_SECONDS = 60;
 const isLocalWebPreview = Platform.OS === 'web'
@@ -38,6 +38,9 @@ function iranPhone(value: string) {
 
 function friendlyError(message: string) {
   const lower = message.toLowerCase();
+  if (lower.includes('anonymous') && lower.includes('disabled')) {
+    return 'شروع بدون شماره هنوز در سرور فعال نشده است. چند لحظه دیگر دوباره امتحان کن.';
+  }
   if (lower.includes('unsupported phone provider') || lower.includes('sms')) {
     return 'ارسال پیامک هنوز فعال نشده است. برای تست باید Test OTP در Supabase تنظیم شود و برای نسخه واقعی ملی‌پیامک متصل شود.';
   }
@@ -50,7 +53,7 @@ function friendlyError(message: string) {
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
-  const [stage, setStage] = useState<Stage>('phone');
+  const [stage, setStage] = useState<Stage>('welcome');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
@@ -65,7 +68,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
   async function resolveAccount(nextSession: Session | null) {
     setSession(nextSession);
     if (!nextSession || !supabase) {
-      setStage('phone');
+      setStage('welcome');
       setLoading(false);
       return;
     }
@@ -132,6 +135,19 @@ export function AuthGate({ children }: { children: ReactNode }) {
     setStage('otp');
   }
 
+  async function startWithoutPhone() {
+    if (!supabase) return;
+    setSubmitting(true);
+    setError('');
+    const { data, error: authError } = await supabase.auth.signInAnonymously();
+    setSubmitting(false);
+    if (authError) {
+      setError(friendlyError(authError.message));
+      return;
+    }
+    await resolveAccount(data.session);
+  }
+
   async function verifyOtp() {
     if (!supabase) return;
     if (secondsRemaining <= 0) {
@@ -190,26 +206,46 @@ export function AuthGate({ children }: { children: ReactNode }) {
     <SafeAreaView style={styles.page}>
       <KeyboardAvoidingView style={styles.center} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.brand}><Text style={styles.brandLetter}>د</Text></View>
-        <Text style={styles.title}>{stage === 'profile' ? 'حساب دنگودونگ تو' : 'ورود به دنگودونگ'}</Text>
+        <Text style={styles.title}>{stage === 'profile' ? 'حساب دنگودونگ تو' : stage === 'welcome' ? 'شروع با دنگودونگ' : 'ورود به دنگودونگ'}</Text>
         <Text style={styles.subtitle}>
+          {stage === 'welcome' && 'بدون واردکردن شماره شروع کن. برای بازیابی اطلاعات روی گوشی دیگر، بعداً می‌توانی شماره‌ات را ثبت کنی.'}
           {stage === 'phone' && 'شماره موبایلت را وارد کن تا کد ورود برایت ارسال شود.'}
           {stage === 'otp' && 'کد شش‌رقمی ارسال‌شده را وارد کن.'}
-          {stage === 'profile' && 'فقط نامت را وارد کن؛ اطلاعات تکمیلی را بعداً در حساب کاربری می‌توانی تکمیل کنی.'}
+          {stage === 'profile' && 'فقط نامت را وارد کن؛ این نام در ماجراهای مشترک به دیگران نمایش داده می‌شود.'}
         </Text>
 
+        {stage === 'welcome' && (
+          <View style={styles.welcomeActions}>
+            <Pressable
+              accessibilityRole="button"
+              disabled={submitting}
+              onPress={startWithoutPhone}
+              style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, submitting && styles.buttonDisabled]}
+            >
+              {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>شروع بدون شماره</Text>}
+            </Pressable>
+            <Pressable accessibilityRole="button" disabled={submitting} onPress={() => { setError(''); setStage('phone'); }} style={styles.secondaryButton}>
+              <Text style={styles.secondaryButtonText}>ورود یا بازیابی با شماره</Text>
+            </Pressable>
+            <Text style={styles.anonymousNotice}>در حالت بدون شماره، با حذف اپ یا خروج از حساب، بازیابی اطلاعات ممکن نیست.</Text>
+          </View>
+        )}
         {stage === 'phone' && (
-          <TextInput
-            accessibilityLabel="شماره موبایل"
-            autoFocus
-            keyboardType="phone-pad"
-            maxLength={11}
-            onChangeText={(value) => setPhone(digits(value).slice(0, 11))}
-            placeholder="۰۹۱۲۱۲۳۴۵۶۷"
-            placeholderTextColor="#A19BA9"
-            style={styles.input}
-            textAlign="center"
-            value={phone}
-          />
+          <>
+            <TextInput
+              accessibilityLabel="شماره موبایل"
+              autoFocus
+              keyboardType="phone-pad"
+              maxLength={11}
+              onChangeText={(value) => setPhone(digits(value).slice(0, 11))}
+              placeholder="۰۹۱۲۱۲۳۴۵۶۷"
+              placeholderTextColor="#A19BA9"
+              style={styles.input}
+              textAlign="center"
+              value={phone}
+            />
+            <Pressable onPress={() => { setError(''); setStage('welcome'); }}><Text style={styles.link}>بازگشت به شروع بدون شماره</Text></Pressable>
+          </>
         )}
         {stage === 'otp' && (
           <>
@@ -241,14 +277,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
         )}
 
         {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
-        <Pressable
+        {stage !== 'welcome' && <Pressable
           accessibilityRole="button"
           disabled={submitting}
           onPress={stage === 'phone' ? requestOtp : stage === 'otp' ? verifyOtp : saveProfile}
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, submitting && styles.buttonDisabled]}
         >
           {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>{stage === 'phone' ? 'دریافت کد ورود' : stage === 'otp' ? 'تأیید و ورود' : 'ذخیره و شروع'}</Text>}
-        </Pressable>
+        </Pressable>}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -268,6 +304,10 @@ const styles = StyleSheet.create({
   otpTimer: { color: '#777184', fontSize: 13, fontWeight: '700', marginTop: -6, marginBottom: 14, writingDirection: 'rtl' },
   hint: { color: '#777184', fontSize: 12, textAlign: 'right', writingDirection: 'rtl', marginTop: -6, marginBottom: 10 },
   error: { width: '100%', color: '#C84359', backgroundColor: '#FFE8EC', borderRadius: 14, padding: 12, textAlign: 'right', writingDirection: 'rtl', lineHeight: 21, marginBottom: 14 },
+  welcomeActions: { width: '100%', gap: 12 },
+  secondaryButton: { width: '100%', minHeight: 52, borderRadius: 18, borderWidth: 1, borderColor: '#D8CFEC', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  secondaryButtonText: { color: '#6652D9', fontSize: 15, fontWeight: '800', writingDirection: 'rtl' },
+  anonymousNotice: { color: '#777184', fontSize: 12, lineHeight: 20, textAlign: 'center', writingDirection: 'rtl', marginTop: 2 },
   button: { width: '100%', minHeight: 56, borderRadius: 18, backgroundColor: '#6652D9', alignItems: 'center', justifyContent: 'center', marginTop: 4 },
   buttonPressed: { backgroundColor: '#4936B6', transform: [{ scale: 0.99 }] },
   buttonDisabled: { opacity: 0.65 },
