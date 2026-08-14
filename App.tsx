@@ -1297,7 +1297,13 @@ function DongoApp() {
                 <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>ماجرای جدید</AppText><AppText style={styles.sheetSubtitle}>موضوع دنگ‌هات را مشخص کن</AppText></View>
                 <View style={styles.sheetSpark}><Sparkles size={20} color={C.purple} /></View>
               </View>
-              <View style={styles.storyForm}>
+              <ScrollView
+                style={styles.sheetScroll}
+                contentContainerStyle={styles.storyForm}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+                showsVerticalScrollIndicator={false}
+              >
                 <AppText style={styles.formLabel}>اسم این ماجرا چیه؟</AppText>
                 <TextInput style={styles.formInput} value={newStoryName} onChangeText={setNewStoryName} placeholder="مثلاً شام جمعه" placeholderTextColor={C.faint} textAlign="right" autoFocus />
                 <View style={styles.ownerUnitsRow}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب من هستند؟</AppText><AppText style={styles.formHelper}>خودت عضو اصلی هستی؛ نام بقیه را در مرحله بعد می‌پرسیم.</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits} onChangeText={(value) => setNewOwnerUnits(String(Math.min(12, Number(normalizeDigits(value).replace(/^0+/, '') || 0)) || ''))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
@@ -1310,7 +1316,7 @@ function DongoApp() {
                 </View>
                 <AppText style={styles.storyHelper}>نوع ماجرا فقط برای ظاهر و پیشنهادهای اولیه است؛ محاسبه دنگ‌ها همیشه یکسان انجام می‌شود.</AppText>
                 <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={startStoryCreation} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
-              </View>
+              </ScrollView>
             </View>
           </KeyboardAvoidingView>
         </Modal>
@@ -1491,7 +1497,13 @@ function DongoApp() {
               <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>ماجرای جدید</AppText><AppText style={styles.sheetSubtitle}>موضوع دنگ‌هات را مشخص کن</AppText></View>
               <View style={styles.sheetSpark}><Sparkles size={20} color={C.purple} /></View>
             </View>
-            <View style={styles.storyForm}>
+            <ScrollView
+              style={styles.sheetScroll}
+              contentContainerStyle={styles.storyForm}
+              keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="on-drag"
+              showsVerticalScrollIndicator={false}
+            >
               <AppText style={styles.formLabel}>اسم این ماجرا چیه؟</AppText>
               <TextInput style={styles.formInput} value={newStoryName} onChangeText={setNewStoryName} placeholder="مثلاً شام جمعه" placeholderTextColor={C.faint} textAlign="right" autoFocus />
               <View style={styles.ownerUnitsRow}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب من هستند؟</AppText><AppText style={styles.formHelper}>خودت عضو اصلی هستی؛ نام بقیه را در مرحله بعد می‌پرسیم.</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits} onChangeText={(value) => setNewOwnerUnits(String(Math.min(12, Number(normalizeDigits(value).replace(/^0+/, '') || 0)) || ''))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
@@ -1504,7 +1516,7 @@ function DongoApp() {
               </View>
               <AppText style={styles.storyHelper}>نوع ماجرا فقط برای ظاهر و پیشنهادهای اولیه است؛ محاسبه دنگ‌ها همیشه یکسان انجام می‌شود.</AppText>
               <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={startStoryCreation} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
-            </View>
+            </ScrollView>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -1972,8 +1984,8 @@ const styles = StyleSheet.create({
   templatePreviewItem: { width: '48.7%', minHeight: 48, borderRadius: 16, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, paddingHorizontal: 11, flexDirection: 'row-reverse', alignItems: 'center', gap: 7 },
   templateEmoji: { fontSize: 20, writingDirection: 'ltr' },
   templatePreviewText: { fontFamily: F.semi, fontSize: 10, color: C.muted },
-  storySheet: { minHeight: '64%', backgroundColor: C.canvas, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
-  storyForm: { padding: 20 },
+  storySheet: { minHeight: '64%', maxHeight: '92%', backgroundColor: C.canvas, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
+  storyForm: { padding: 20, paddingBottom: 32 },
   storyTemplateGrid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 9 },
   storyTemplate: { width: '48.6%', minHeight: 64, borderRadius: 18, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, paddingHorizontal: 11, flexDirection: 'row-reverse', alignItems: 'center', gap: 8, position: 'relative' },
   storyTemplateActive: { borderWidth: 2, borderColor: C.purple, backgroundColor: '#FAF9FF' },
