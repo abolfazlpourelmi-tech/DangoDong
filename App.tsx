@@ -433,7 +433,8 @@ function DongoApp() {
       setAccountError('دریافت اطلاعات حساب ناموفق بود.');
     } else {
       setAccountName(profile?.full_name ?? '');
-      setAccountPhone(profile?.phone ?? user.phone ?? '');
+      const storedPhone = profile?.phone ?? user.phone ?? '';
+      setAccountPhone(storedPhone.startsWith('anonymous:') ? '' : storedPhone);
       setAccountCardNumber(paymentMethod?.card_number ?? '');
     }
     setAccountLoading(false);
@@ -458,7 +459,7 @@ function DongoApp() {
     const { error: profileError } = await supabase.from('profiles').upsert({
       id: userData.user.id,
       full_name: name,
-      phone: accountPhone || userData.user.phone,
+      phone: accountPhone || userData.user.phone || `anonymous:${userData.user.id}`,
       updated_at: new Date().toISOString(),
     });
     if (profileError) {
