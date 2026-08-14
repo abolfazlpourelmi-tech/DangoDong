@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BackHandler,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -25,6 +26,7 @@ import {
   Text,
   TextInput,
   type TextProps,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {
@@ -229,6 +231,7 @@ function CategoryBadge({ category, size = 48 }: { category?: ExpenseCategory; si
 }
 
 function DongoApp() {
+  const { height: windowHeight } = useWindowDimensions();
   const [fontsLoaded] = useFonts({
     Estedad_400Regular,
     Estedad_500Medium,
@@ -294,7 +297,21 @@ function DongoApp() {
   const [accountLoading, setAccountLoading] = useState(true);
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountError, setAccountError] = useState('');
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const lastBackPressAt = useRef(0);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSubscription = Keyboard.addListener(showEvent, (event) => setKeyboardHeight(event.endCoordinates.height));
+    const hideSubscription = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
+
+  const storySheetHeight = Math.max(280, Math.min(Math.round(windowHeight * 0.92), windowHeight - keyboardHeight - 14));
 
   const balances = useMemo(() => applySettlementPayments(calculateBalances(members, expenses), payments), [members, expenses, payments]);
   const transfers = useMemo(() => createSettlement(balances), [balances]);
@@ -1290,7 +1307,7 @@ function DongoApp() {
 
         <Modal visible={storyModal} animationType="slide" transparent onRequestClose={() => setStoryModal(false)}>
           <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-            <View style={styles.storySheet} accessibilityViewIsModal>
+              <View style={[styles.storySheet, keyboardHeight > 0 && styles.storySheetKeyboardOpen, keyboardHeight > 0 && { height: storySheetHeight, maxHeight: storySheetHeight }]} accessibilityViewIsModal>
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeader}>
                 <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => setStoryModal(false)}><X size={21} color={C.ink} /></Pressable>
@@ -1490,7 +1507,7 @@ function DongoApp() {
 
       <Modal visible={storyModal} animationType="slide" transparent onRequestClose={() => setStoryModal(false)}>
         <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={styles.storySheet} accessibilityViewIsModal>
+          <View style={[styles.storySheet, keyboardHeight > 0 && styles.storySheetKeyboardOpen, keyboardHeight > 0 && { height: storySheetHeight, maxHeight: storySheetHeight }]} accessibilityViewIsModal>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
               <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => setStoryModal(false)}><X size={21} color={C.ink} /></Pressable>
@@ -1985,6 +2002,7 @@ const styles = StyleSheet.create({
   templateEmoji: { fontSize: 20, writingDirection: 'ltr' },
   templatePreviewText: { fontFamily: F.semi, fontSize: 10, color: C.muted },
   storySheet: { minHeight: '64%', maxHeight: '92%', backgroundColor: C.canvas, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
+  storySheetKeyboardOpen: { minHeight: 0 },
   storyForm: { padding: 20, paddingBottom: 32 },
   storyTemplateGrid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 9 },
   storyTemplate: { width: '48.6%', minHeight: 64, borderRadius: 18, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, paddingHorizontal: 11, flexDirection: 'row-reverse', alignItems: 'center', gap: 8, position: 'relative' },

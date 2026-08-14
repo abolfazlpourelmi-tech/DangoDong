@@ -2,6 +2,7 @@ import type { Session } from '@supabase/supabase-js';
 import { type ReactNode, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -40,6 +41,9 @@ function friendlyError(message: string) {
   const lower = message.toLowerCase();
   if (lower.includes('anonymous') && lower.includes('disabled')) {
     return 'شروع بدون شماره هنوز در سرور فعال نشده است. چند لحظه دیگر دوباره امتحان کن.';
+  }
+  if (lower.includes('profiles_phone_key')) {
+    return 'این شماره قبلاً به حساب دیگری وصل است. برای شروع بدون شماره، شماره‌ای ثبت نمی‌کنیم؛ یک‌بار دوباره ذخیره کن.';
   }
   if (lower.includes('unsupported phone provider') || lower.includes('sms')) {
     return 'ارسال پیامک هنوز فعال نشده است. برای تست باید Test OTP در Supabase تنظیم شود و برای نسخه واقعی ملی‌پیامک متصل شود.';
@@ -179,7 +183,9 @@ export function AuthGate({ children }: { children: ReactNode }) {
     }
     setSubmitting(true);
     setError('');
-    const normalizedPhone = session.user.phone ?? submittedPhone;
+    // Anonymous users do not have a phone number. Store NULL, not an empty
+    // string: PostgreSQL allows multiple NULLs in a unique phone column.
+    const normalizedPhone = session.user.phone || submittedPhone || null;
     const { error: profileError } = await supabase.from('profiles').upsert({
       id: session.user.id,
       full_name: name,
