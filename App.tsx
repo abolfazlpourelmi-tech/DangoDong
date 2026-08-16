@@ -14,7 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   BackHandler,
   Image,
-  KeyboardAvoidingView,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -26,6 +26,7 @@ import {
   Text,
   TextInput,
   type TextProps,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import {
@@ -181,6 +182,48 @@ function AppText({ style, ...props }: TextProps) {
   return <Text {...props} style={[styles.defaultText, style]} />;
 }
 
+/**
+ * The app runs edge-to-edge, and Android ignores `adjustResize` for edge-to-edge
+ * windows (API 30+, enforced on Android 15). The window therefore never shrinks
+ * when the keyboard opens, which made `KeyboardAvoidingView` subtract a keyboard
+ * height that the layout had not actually lost — it collapsed sheets to nothing
+ * and left a transparent modal swallowing every touch.
+ *
+ * Instead we read the keyboard height from the keyboard events themselves and
+ * apply it as padding. If a device *does* still resize its window (older
+ * Android without edge-to-edge), that height is already gone from the layout,
+ * so we subtract whatever the window shrank by and never compensate twice.
+ */
+function useKeyboardInset() {
+  const { height: windowHeight } = useWindowDimensions();
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const unobstructedHeight = useRef(windowHeight);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardHeight(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (keyboardHeight === 0) unobstructedHeight.current = windowHeight;
+  }, [keyboardHeight, windowHeight]);
+
+  const windowShrankBy = Math.max(0, unobstructedHeight.current - windowHeight);
+  return {
+    keyboardVisible: keyboardHeight > 0,
+    keyboardInset: Math.max(0, Math.round(keyboardHeight - windowShrankBy)),
+    windowHeight,
+  };
+}
+
 function formatMoney(amount: number) {
   return `${faNumber.format(Math.round(amount))} تومان`;
 }
@@ -237,6 +280,11 @@ function CategoryBadge({ category, size = 48 }: { category?: ExpenseCategory; si
 }
 
 function DongoApp() {
+  const { keyboardVisible, keyboardInset, windowHeight } = useKeyboardInset();
+  // Sheets are anchored to the bottom, so they have to give the keyboard its
+  // space explicitly; a fixed height keeps the internal ScrollView scrollable
+  // instead of letting percentage heights re-resolve on every keyboard frame.
+  const sheetHeight = Math.round(Math.min(windowHeight * 0.92, windowHeight - keyboardInset));
   const [fontsLoaded] = useFonts({
     Estedad_400Regular,
     Estedad_500Medium,
@@ -1316,8 +1364,8 @@ function DongoApp() {
         </ScrollView>}
 
         <Modal visible={storyModal} animationType="slide" transparent onRequestClose={() => setStoryModal(false)}>
-          <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-              <View style={styles.storySheet} accessibilityViewIsModal>
+          <View style={[styles.modalBackdrop, { paddingBottom: keyboardInset }]}>
+              <View style={[styles.storySheet, { height: sheetHeight }]} accessibilityViewIsModal>
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeader}>
                 <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => setStoryModal(false)}><X size={21} color={C.ink} /></Pressable>
@@ -1328,7 +1376,6 @@ function DongoApp() {
                 style={styles.sheetScroll}
                 contentContainerStyle={styles.storyForm}
                 keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="on-drag"
                 showsVerticalScrollIndicator={false}
               >
                 <AppText style={styles.formLabel}>اسم این ماجرا چیه؟</AppText>
@@ -1345,23 +1392,23 @@ function DongoApp() {
                 <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={startStoryCreation} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
               </ScrollView>
             </View>
-          </KeyboardAvoidingView>
+          </View>
         </Modal>
         <Modal visible={ownerFamilyModal} animationType="fade" transparent onRequestClose={() => { setOwnerFamilyModal(false); setStoryModal(true); }}>
-          <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.familySetupDialog} accessibilityViewIsModal>
               <View style={styles.familySetupHeader}><View style={styles.dialogIcon}><Users size={25} color={C.purple} /></View><View style={styles.familySetupCopy}><AppText style={styles.familyStepLabel}>مرحله ۲ از ۲</AppText><AppText style={styles.dialogTitle}>اعضای حساب تو</AppText><AppText style={styles.dialogTextCompact}>اسم‌ها باعث می‌شوند موقع ثبت خرج دقیقاً افراد حاضر را انتخاب کنی.</AppText></View></View>
               <View style={styles.familyHeadRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.familyHeadCopy}><AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText><AppText style={styles.familyHeadName}>{accountName.trim() || 'من (دارنده حساب)'}</AppText></View></View>
-              <ScrollView style={styles.familyInputsScroll} contentContainerStyle={styles.familyInputsContent} keyboardShouldPersistTaps="handled">
+              <View style={styles.familyInputsContent}>
                 {ownerFamilyNames.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput autoFocus={index === 0} value={value} onChangeText={(text) => setOwnerFamilyNames((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
-              </ScrollView>
+              </View>
               <AppText style={styles.familySetupHint}>بعداً هم می‌توانی نام‌ها را ویرایش کنی؛ تسویه نهایی همیشه با حساب سرپرست انجام می‌شود.</AppText>
               <View style={styles.dialogActions}><Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => { setOwnerFamilyModal(false); setStoryModal(true); }}><AppText style={styles.dialogCancelText}>مرحله قبل</AppText></Pressable><Pressable accessibilityRole="button" disabled={ownerFamilyNames.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (ownerFamilyNames.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={() => void createStory(ownerFamilyNames)}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>تأیید و ساخت ماجرا</AppText></Pressable></View>
             </View>
-          </KeyboardAvoidingView>
+          </ScrollView>
         </Modal>
         <Modal visible={joinModal} animationType="fade" transparent onRequestClose={() => setJoinModal(false)}>
-          <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+          <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.dialog} accessibilityViewIsModal>
               <View style={styles.dialogIcon}><UserPlus size={26} color={C.purple} /></View>
               <AppText style={styles.dialogTitle}>پیوستن به ماجرا</AppText>
@@ -1374,7 +1421,7 @@ function DongoApp() {
                 <Pressable accessibilityRole="button" disabled={!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><UserPlus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>پیوستن</AppText></Pressable>
               </View>
             </View>
-          </KeyboardAvoidingView>
+          </ScrollView>
         </Modal>
       </SafeAreaView>
     );
@@ -1405,7 +1452,8 @@ function DongoApp() {
             {tab === 'account' && renderAccount()}
           </>
         )}
-        <View style={styles.scrollEnd} />
+        {/* Extra room so account fields stay scrollable above the keyboard. */}
+        <View style={[styles.scrollEnd, keyboardVisible && { height: keyboardInset + 24 }]} />
       </ScrollView>
 
       {toast ? (
@@ -1415,7 +1463,9 @@ function DongoApp() {
         </View>
       ) : null}
 
-      <View style={styles.bottomNav}>
+      {/* The nav floats above the content, so with the keyboard up it would
+          otherwise hover over the keyboard and cover the field being typed in. */}
+      {!keyboardVisible && <View style={styles.bottomNav}>
         <Pressable accessibilityRole="tab" accessibilityState={{ selected: storiesHome }} onPress={() => { setStoriesHome(true); setTab('home'); }} style={styles.navItem}>
           <View style={[styles.navIconWrap, storiesHome && styles.navIconWrapActive]}><Home size={21} color={storiesHome ? C.purple : C.faint} fill={storiesHome ? C.purplePale : 'transparent'} /></View>
           <AppText style={[styles.navLabel, storiesHome && styles.navLabelActive]}>ماجراها</AppText>
@@ -1436,7 +1486,7 @@ function DongoApp() {
           <View style={[styles.navIconWrap, tab === 'account' && styles.navIconWrapActive]}><UserRound size={21} color={tab === 'account' ? C.purple : C.faint} /></View>
           <AppText style={[styles.navLabel, tab === 'account' && styles.navLabelActive]}>حساب من</AppText>
         </Pressable>
-      </View>
+      </View>}
 
       <Modal visible={storySwitcher} animationType="fade" transparent onRequestClose={() => setStorySwitcher(false)}>
         <View style={styles.centeredBackdrop}>
@@ -1516,8 +1566,8 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={storyModal} animationType="slide" transparent onRequestClose={() => setStoryModal(false)}>
-        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={styles.storySheet} accessibilityViewIsModal>
+        <View style={[styles.modalBackdrop, { paddingBottom: keyboardInset }]}>
+          <View style={[styles.storySheet, { height: sheetHeight }]} accessibilityViewIsModal>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
               <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => setStoryModal(false)}><X size={21} color={C.ink} /></Pressable>
@@ -1528,7 +1578,7 @@ function DongoApp() {
               style={styles.sheetScroll}
               contentContainerStyle={styles.storyForm}
               keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="on-drag"
+             
               showsVerticalScrollIndicator={false}
             >
               <AppText style={styles.formLabel}>اسم این ماجرا چیه؟</AppText>
@@ -1545,21 +1595,21 @@ function DongoApp() {
               <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={startStoryCreation} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
             </ScrollView>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       <Modal visible={ownerFamilyModal} animationType="fade" transparent onRequestClose={() => { setOwnerFamilyModal(false); setStoryModal(true); }}>
-        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.familySetupDialog} accessibilityViewIsModal>
             <View style={styles.familySetupHeader}><View style={styles.dialogIcon}><Users size={25} color={C.purple} /></View><View style={styles.familySetupCopy}><AppText style={styles.familyStepLabel}>مرحله ۲ از ۲</AppText><AppText style={styles.dialogTitle}>اعضای حساب تو</AppText><AppText style={styles.dialogTextCompact}>اسم‌ها باعث می‌شوند موقع ثبت خرج دقیقاً افراد حاضر را انتخاب کنی.</AppText></View></View>
             <View style={styles.familyHeadRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.familyHeadCopy}><AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText><AppText style={styles.familyHeadName}>{accountName.trim() || 'من (دارنده حساب)'}</AppText></View></View>
-            <ScrollView style={styles.familyInputsScroll} contentContainerStyle={styles.familyInputsContent} keyboardShouldPersistTaps="handled">
+            <View style={styles.familyInputsContent}>
               {ownerFamilyNames.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput autoFocus={index === 0} value={value} onChangeText={(text) => setOwnerFamilyNames((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
-            </ScrollView>
+            </View>
             <AppText style={styles.familySetupHint}>بعداً هم می‌توانی نام‌ها را ویرایش کنی؛ تسویه نهایی همیشه با حساب سرپرست انجام می‌شود.</AppText>
             <View style={styles.dialogActions}><Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => { setOwnerFamilyModal(false); setStoryModal(true); }}><AppText style={styles.dialogCancelText}>مرحله قبل</AppText></Pressable><Pressable accessibilityRole="button" disabled={ownerFamilyNames.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (ownerFamilyNames.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={() => void createStory(ownerFamilyNames)}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>تأیید و ساخت ماجرا</AppText></Pressable></View>
           </View>
-        </KeyboardAvoidingView>
+        </ScrollView>
       </Modal>
 
       <Modal visible={finishModal} animationType="fade" transparent onRequestClose={() => setFinishModal(false)}>
@@ -1617,25 +1667,25 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={editMemberModal} animationType="fade" transparent onRequestClose={() => setEditMemberModal(false)}>
-        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Pencil size={24} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>ویرایش عضو</AppText>
             <AppText style={styles.dialogText}>{editingMember?.kind === 'guest' ? 'نام حساب و تعداد نفرات نمایندگی‌شده را تغییر بده.' : 'نام این عضو از پروفایل خودش گرفته می‌شود؛ تعداد نفرات حساب را می‌توانی تغییر بدهی.'}</AppText>
             <TextInput editable={editingMember?.kind === 'guest'} style={[styles.formInput, editingMember?.kind !== 'guest' && styles.readonlyInput]} value={editMemberName} onChangeText={setEditMemberName} placeholder="نام عضو" placeholderTextColor={C.faint} textAlign="right" />
             <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>تعداد نفرات این حساب</AppText><AppText style={styles.formHelper}>مبنای تقسیم مساوی هزینه‌های بعدی؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={editMemberUnits} onChangeText={changeEditMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
-            {Number(editMemberUnits || 1) > 1 && <View style={styles.editFamilySection}><AppText style={styles.formLabelNoMargin}>اعضای این حساب</AppText><AppText style={styles.formHelper}>عضو ۱ سرپرست ثابت است؛ نام بقیه اعضا را جدا وارد کن.</AppText><View style={styles.editFamilyFixedRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.editFamilyFixedCopy}><AppText style={styles.familyInputLabel}>عضو ۱ · سرپرست</AppText><AppText style={styles.editFamilyFixedName}>{editingMember?.kind === 'guest' ? editMemberName || 'سرپرست حساب' : editingMember?.householdMembers?.[0] || accountName.trim() || editingMember?.name || 'من'}</AppText></View></View><ScrollView style={styles.editFamilyInputsScroll} contentContainerStyle={styles.editFamilyInputsContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{editHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setEditHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</ScrollView></View>}
+            {Number(editMemberUnits || 1) > 1 && <View style={styles.editFamilySection}><AppText style={styles.formLabelNoMargin}>اعضای این حساب</AppText><AppText style={styles.formHelper}>عضو ۱ سرپرست ثابت است؛ نام بقیه اعضا را جدا وارد کن.</AppText><View style={styles.editFamilyFixedRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.editFamilyFixedCopy}><AppText style={styles.familyInputLabel}>عضو ۱ · سرپرست</AppText><AppText style={styles.editFamilyFixedName}>{editingMember?.kind === 'guest' ? editMemberName || 'سرپرست حساب' : editingMember?.householdMembers?.[0] || accountName.trim() || editingMember?.name || 'من'}</AppText></View></View><View style={styles.editFamilyInputsContent}>{editHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setEditHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setEditMemberModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
               <Pressable accessibilityRole="button" disabled={cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)} style={[styles.dialogAdd, (cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)) && styles.saveButtonDisabled]} onPress={saveMemberEdit}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>ذخیره تغییرات</AppText></Pressable>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </ScrollView>
       </Modal>
 
       <Modal visible={expenseModal} animationType="slide" transparent onRequestClose={() => setExpenseModal(false)}>
-        <KeyboardAvoidingView style={styles.modalBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
-          <View style={styles.sheet} accessibilityViewIsModal>
+        <View style={[styles.modalBackdrop, { paddingBottom: keyboardInset }]}>
+          <View style={[styles.sheet, { height: sheetHeight }]} accessibilityViewIsModal>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
               <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => setExpenseModal(false)}><X size={21} color={C.ink} /></Pressable>
@@ -1643,7 +1693,7 @@ function DongoApp() {
               <View style={styles.sheetSpark}><Sparkles size={20} color={C.purple} /></View>
             </View>
 
-            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetScrollContent} keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" showsVerticalScrollIndicator={false}>
+            <ScrollView style={styles.sheetScroll} contentContainerStyle={styles.sheetScrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
               <View style={styles.amountPanel}>
                 <AppText style={styles.amountLabel}>چقدر پرداخت شد؟</AppText>
                 <View style={styles.amountInputRow}>
@@ -1740,11 +1790,11 @@ function DongoApp() {
               </Pressable>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       <Modal visible={memberModal} animationType="fade" transparent onRequestClose={() => setMemberModal(false)}>
-        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Users size={26} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>عضو جدید</AppText>
@@ -1758,7 +1808,7 @@ function DongoApp() {
                 <AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText>
                 <TextInput accessibilityLabel="نام سرپرست حساب جدید" style={styles.formInput} value={newMemberName} onChangeText={setNewMemberName} placeholder="نام سرپرست خانواده" placeholderTextColor={C.faint} textAlign="right" autoFocus />
                 <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>تعداد نفرات این حساب</AppText><AppText style={styles.formHelper}>سرپرست هم جزو تعداد است؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={newMemberUnits} onChangeText={changeNewMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
-                {Number(newMemberUnits || 1) > 1 && <View style={styles.newMemberFamilySection}><AppText style={styles.formLabelNoMargin}>اعضای دیگر خانواده</AppText><AppText style={styles.formHelper}>برای عضو ۲، ۳ و… نام جداگانه وارد کن.</AppText><ScrollView style={styles.newMemberFamilyScroll} contentContainerStyle={styles.editFamilyInputsContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>{newHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setNewHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</ScrollView></View>}
+                {Number(newMemberUnits || 1) > 1 && <View style={styles.newMemberFamilySection}><AppText style={styles.formLabelNoMargin}>اعضای دیگر خانواده</AppText><AppText style={styles.formHelper}>برای عضو ۲، ۳ و… نام جداگانه وارد کن.</AppText><View style={styles.editFamilyInputsContent}>{newHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setNewHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
                 <View style={styles.dialogActions}>
                   <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setMemberModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
                   <Pressable accessibilityRole="button" accessibilityState={{ disabled: newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy }} style={[styles.dialogAdd, (newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} disabled={newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} onPress={addMember}><Plus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>افزودن حساب</AppText></Pressable>
@@ -1776,11 +1826,11 @@ function DongoApp() {
               </>
             )}
           </View>
-        </KeyboardAvoidingView>
+        </ScrollView>
       </Modal>
 
       <Modal visible={joinModal} animationType="fade" transparent onRequestClose={() => setJoinModal(false)}>
-        <KeyboardAvoidingView style={styles.centeredBackdrop} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><UserPlus size={26} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>پیوستن به ماجرا</AppText>
@@ -1793,7 +1843,7 @@ function DongoApp() {
               <Pressable accessibilityRole="button" disabled={!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><UserPlus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>پیوستن</AppText></Pressable>
             </View>
           </View>
-        </KeyboardAvoidingView>
+        </ScrollView>
       </Modal>
     </SafeAreaView>
   );
@@ -1926,8 +1976,9 @@ const styles = StyleSheet.create({
   toast: { position: 'absolute', bottom: 98, left: 22, right: 22, minHeight: 51, borderRadius: 18, backgroundColor: C.ink, paddingHorizontal: 14, flexDirection: 'row-reverse', alignItems: 'center', gap: 9, shadowColor: C.ink, shadowOpacity: 0.2, shadowRadius: 12, elevation: 8 },
   toastCheck: { width: 27, height: 27, borderRadius: 10, backgroundColor: C.mint, alignItems: 'center', justifyContent: 'center' },
   toastText: { flex: 1, fontFamily: F.semi, color: '#FFFFFF', fontSize: 11, textAlign: 'right' },
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(28,22,48,0.45)', justifyContent: 'flex-end', paddingBottom: Platform.OS === 'android' ? 26 : 0 },
-  sheet: { height: '92%', backgroundColor: C.canvas, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(28,22,48,0.45)', justifyContent: 'flex-end' },
+  // Height is supplied at render time from the keyboard inset.
+  sheet: { backgroundColor: C.canvas, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
   sheetHandle: { width: 44, height: 5, borderRadius: 3, backgroundColor: '#D8CFDF', alignSelf: 'center', marginTop: 9 },
   sheetHeader: { minHeight: 73, paddingHorizontal: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: C.line },
   sheetClose: { width: 43, height: 43, borderRadius: 15, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.line },
@@ -1979,7 +2030,11 @@ const styles = StyleSheet.create({
   saveButtonDisabled: { opacity: 0.38, shadowOpacity: 0 },
   saveButtonText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 13 },
   centeredBackdrop: { flex: 1, backgroundColor: 'rgba(28,22,48,0.45)', justifyContent: 'center', padding: 22 },
-  dialog: { maxHeight: '92%', backgroundColor: C.canvas, borderRadius: 28, padding: 21, alignItems: 'center' },
+  // Dialogs that hold form fields sit inside a ScrollView instead, so a tall
+  // form stays reachable with the keyboard open rather than being clipped.
+  centeredScroll: { flex: 1, backgroundColor: 'rgba(28,22,48,0.45)' },
+  centeredBackdropContent: { flexGrow: 1, justifyContent: 'center', padding: 22 },
+  dialog: { backgroundColor: C.canvas, borderRadius: 28, padding: 21, alignItems: 'center' },
   dialogIcon: { width: 58, height: 58, borderRadius: 21, backgroundColor: C.purplePale, alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
   dialogTitle: { fontFamily: F.extra, fontSize: 19 },
   dialogText: { fontFamily: F.medium, color: C.muted, fontSize: 11, lineHeight: 20, textAlign: 'center', marginTop: 4, marginBottom: 16 },
@@ -1988,7 +2043,7 @@ const styles = StyleSheet.create({
   dialogCancelText: { fontFamily: F.bold, color: C.muted, fontSize: 12 },
   dialogAdd: { flex: 1.4, minHeight: 50, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, backgroundColor: C.purple },
   dialogAddText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 12 },
-  familySetupDialog: { width: '100%', maxHeight: '88%', borderRadius: 28, backgroundColor: C.canvas, padding: 19 },
+  familySetupDialog: { width: '100%', borderRadius: 28, backgroundColor: C.canvas, padding: 19 },
   familySetupHeader: { flexDirection: 'row-reverse', alignItems: 'center', gap: 11 },
   familySetupCopy: { flex: 1, alignItems: 'flex-end' },
   familyStepLabel: { fontFamily: F.bold, color: C.purple, fontSize: 8, marginBottom: 2 },
@@ -1998,7 +2053,6 @@ const styles = StyleSheet.create({
   familyHeadName: { fontFamily: F.extra, color: C.ink, fontSize: 13, marginTop: 3 },
   familyFixedBadge: { minHeight: 31, borderRadius: 11, backgroundColor: C.paper, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 4 },
   familyFixedText: { fontFamily: F.bold, color: C.mintDark, fontSize: 8 },
-  familyInputsScroll: { maxHeight: 305, marginTop: 11 },
   familyInputsContent: { gap: 8, paddingBottom: 3 },
   familyInputRow: { minHeight: 57, borderRadius: 16, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, padding: 7, flexDirection: 'row-reverse', alignItems: 'center', gap: 8 },
   familyInputLabel: { width: 59, fontFamily: F.bold, color: C.purple, fontSize: 9, textAlign: 'right' },
@@ -2008,10 +2062,8 @@ const styles = StyleSheet.create({
   editFamilyFixedRow: { minHeight: 58, borderRadius: 16, backgroundColor: C.mintPale, borderWidth: 1, borderColor: '#BFE6D8', padding: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   editFamilyFixedCopy: { flex: 1, alignItems: 'flex-end' },
   editFamilyFixedName: { fontFamily: F.extra, color: C.ink, fontSize: 11, marginTop: 2, textAlign: 'right' },
-  editFamilyInputsScroll: { maxHeight: 180 },
   editFamilyInputsContent: { gap: 8, paddingBottom: 2 },
   newMemberFamilySection: { width: '100%', marginTop: 12, gap: 7, alignItems: 'stretch' },
-  newMemberFamilyScroll: { maxHeight: 175 },
   memberUnitsField: { width: '100%', minHeight: 68, borderRadius: 17, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, marginTop: 10, padding: 10, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
   memberUnitsFieldCopy: { flex: 1, alignItems: 'flex-end' },
   memberUnitsInput: { width: 58, height: 48, borderRadius: 14, backgroundColor: C.purplePale, borderWidth: 1, borderColor: '#D7CEF8', fontFamily: F.extra, color: C.purple, fontSize: 18 },
@@ -2033,7 +2085,7 @@ const styles = StyleSheet.create({
   templatePreviewItem: { width: '48.7%', minHeight: 48, borderRadius: 16, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, paddingHorizontal: 11, flexDirection: 'row-reverse', alignItems: 'center', gap: 7 },
   templateEmoji: { fontSize: 20, writingDirection: 'ltr' },
   templatePreviewText: { fontFamily: F.semi, fontSize: 10, color: C.muted },
-  storySheet: { minHeight: '64%', maxHeight: '92%', backgroundColor: C.canvas, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
+  storySheet: { backgroundColor: C.canvas, borderTopLeftRadius: 32, borderTopRightRadius: 32, overflow: 'hidden' },
   storyForm: { padding: 20, paddingBottom: 32 },
   storyTemplateGrid: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 9 },
   storyTemplate: { width: '48.6%', minHeight: 64, borderRadius: 18, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, paddingHorizontal: 11, flexDirection: 'row-reverse', alignItems: 'center', gap: 8, position: 'relative' },

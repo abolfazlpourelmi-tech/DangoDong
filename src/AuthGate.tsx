@@ -3,10 +3,10 @@ import { type ReactNode, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -54,6 +54,9 @@ function friendlyError(message: string) {
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
+  // Matches App.tsx: the edge-to-edge window never resizes for the keyboard, so
+  // the inset has to be applied by hand instead of via KeyboardAvoidingView.
+  const [keyboardInset, setKeyboardInset] = useState(0);
   const [stage, setStage] = useState<Stage>('welcome');
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -102,6 +105,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
       void resolveAccount(nextSession);
     });
     return () => data.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (event) => setKeyboardInset(event.endCoordinates?.height ?? 0));
+    const hideSub = Keyboard.addListener(hideEvent, () => setKeyboardInset(0));
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -208,7 +222,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   return (
     <SafeAreaView style={styles.page}>
-      <KeyboardAvoidingView style={styles.center} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={[styles.center, { paddingBottom: 28 + keyboardInset }]}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.brand}><Text style={styles.brandLetter}>د</Text></View>
         <Text style={styles.title}>{stage === 'profile' ? 'حساب دنگودونگ تو' : stage === 'welcome' ? 'شروع با دنگودونگ' : 'ورود به دنگودونگ'}</Text>
         <Text style={styles.subtitle}>
@@ -289,14 +308,15 @@ export function AuthGate({ children }: { children: ReactNode }) {
         >
           {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>{stage === 'phone' ? 'دریافت کد ورود' : stage === 'otp' ? 'تأیید و ورود' : 'ذخیره و شروع'}</Text>}
         </Pressable>}
-      </KeyboardAvoidingView>
+      </ScrollView>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: '#FFF8EF', alignItems: 'center', justifyContent: 'center' },
-  center: { width: '100%', maxWidth: 440, paddingHorizontal: 28, alignItems: 'center', justifyContent: 'center' },
+  scroll: { flex: 1, width: '100%' },
+  center: { flexGrow: 1, width: '100%', maxWidth: 440, alignSelf: 'center', paddingHorizontal: 28, paddingTop: 28, alignItems: 'center', justifyContent: 'center' },
   brand: { width: 68, height: 68, borderRadius: 24, backgroundColor: '#6652D9', alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
   brandLetter: { color: '#FFFFFF', fontSize: 36, fontWeight: '900' },
   title: { color: '#25203A', fontSize: 26, fontWeight: '800', writingDirection: 'rtl', marginBottom: 8 },
