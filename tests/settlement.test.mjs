@@ -6,6 +6,7 @@ import {
   calculateBalances,
   createSettlement,
   isFromLastWeek,
+  matchAllocationParticipants,
 } from '../src/settlement.ts';
 
 const member = (id) => ({ id, name: id, color: '#000000' });
@@ -124,4 +125,44 @@ test('isFromLastWeek keeps rows without a usable timestamp', () => {
   const base = { id: 'e', title: 't', amount: 1, payerId: 'a', createdAt: 'همین حالا' };
   assert.equal(isFromLastWeek(base, now), true);
   assert.equal(isFromLastWeek({ ...base, createdAtISO: 'not-a-date' }, now), true);
+});
+
+const household = [
+  { id: 'm::0', name: 'سارا' },
+  { id: 'm::1', name: 'مهدی' },
+  { id: 'm::2', name: 'نازنین' },
+];
+
+test('matchAllocationParticipants recovers the named subset of a household', () => {
+  const matched = matchAllocationParticipants('سارا، نازنین', household);
+  assert.deepEqual(matched.map((entry) => entry.person.id), ['m::0', 'm::2']);
+  assert.deepEqual(matched.map((entry) => entry.item), [undefined, undefined]);
+});
+
+test('matchAllocationParticipants recovers itemized labels', () => {
+  const matched = matchAllocationParticipants('سارا: پاستا، مهدی: پیتزا', household);
+  assert.deepEqual(matched.map((entry) => [entry.person.id, entry.item]), [
+    ['m::0', 'پاستا'],
+    ['m::1', 'پیتزا'],
+  ]);
+});
+
+test('matchAllocationParticipants falls back to the whole household', () => {
+  assert.equal(matchAllocationParticipants(undefined, household).length, 3);
+  assert.equal(matchAllocationParticipants('', household).length, 3);
+  // A label naming nobody we know must not silently drop everyone.
+  assert.equal(matchAllocationParticipants('کسی دیگر', household).length, 3);
+});
+
+test('an equal-split expense round-trips back to the same per-person amounts', () => {
+  // Rebuilds what the edit sheet does: recover people, then respread the total.
+  const total = 100;
+  const perPerson = allocateByWeight(total, household.map((person) => ({ memberId: person.id, weight: 1 })));
+  const label = household.map((person) => person.name).join('، ');
+
+  const recovered = matchAllocationParticipants(label, household);
+  const respread = allocateByWeight(total, recovered.map(({ person }) => ({ memberId: person.id, weight: 1 })));
+
+  assert.deepEqual(respread, perPerson);
+  assert.equal(respread.reduce((sum, item) => sum + item.amount, 0), total);
 });

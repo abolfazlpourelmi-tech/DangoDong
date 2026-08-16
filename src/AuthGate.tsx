@@ -5,13 +5,13 @@ import {
   Keyboard,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isSupabaseConfigured, supabase } from './supabase';
 
 type Stage = 'welcome' | 'phone' | 'otp' | 'profile' | 'ready';
@@ -56,6 +56,7 @@ function friendlyError(message: string) {
 export function AuthGate({ children }: { children: ReactNode }) {
   // Matches App.tsx: the edge-to-edge window never resizes for the keyboard, so
   // the inset has to be applied by hand instead of via KeyboardAvoidingView.
+  const insets = useSafeAreaInsets();
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [stage, setStage] = useState<Stage>('welcome');
   const [loading, setLoading] = useState(true);
@@ -217,14 +218,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // Local browser previews must never consume SMS credits. Production Android
   // builds do not satisfy this localhost-only condition.
   if (isLocalWebPreview) return <>{children}</>;
-  if (loading) return <SafeAreaView style={styles.page}><ActivityIndicator size="large" color="#6652D9" /></SafeAreaView>;
+  if (loading) return <View style={[styles.page, { paddingTop: insets.top }]}><ActivityIndicator size="large" color="#6652D9" /></View>;
   if (stage === 'ready') return <>{children}</>;
 
   return (
-    <SafeAreaView style={styles.page}>
+    <View style={[styles.page, { paddingTop: insets.top }]}>
       <ScrollView
         style={styles.scroll}
-        contentContainerStyle={[styles.center, { paddingBottom: 28 + keyboardInset }]}
+        contentContainerStyle={[styles.center, { paddingBottom: 28 + Math.max(keyboardInset, insets.bottom) }]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -309,7 +310,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
           {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>{stage === 'phone' ? 'دریافت کد ورود' : stage === 'otp' ? 'تأیید و ورود' : 'ذخیره و شروع'}</Text>}
         </Pressable>}
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 

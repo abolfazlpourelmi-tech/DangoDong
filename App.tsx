@@ -18,10 +18,8 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   Share,
   ScrollView,
-  StatusBar as RNStatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -29,12 +27,14 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   allocateByWeight,
   applySettlementPayments,
   calculateBalances,
   createSettlement,
   isFromLastWeek,
+  matchAllocationParticipants,
   type Expense,
   type ExpenseCategory,
   type Member,
@@ -55,6 +55,8 @@ import {
   subscribeToStoryChanges,
   updateOnlineMember,
   deleteOnlineStory,
+  updateOnlineExpense,
+  deleteOnlineExpense,
 } from './src/storyRepository';
 
 // SDK 54 pins react-native-svg 15.12, whose recursive icon prop types can
@@ -120,10 +122,6 @@ const F = {
 };
 
 const AVATAR_COLORS = ['#6652D9', '#FF7A6B', '#4FC7A4', '#F0A83A', '#4E82D8', '#A95AC2'];
-// The app draws its own top bar and runs edge-to-edge on Android, where
-// SafeAreaView is a no-op. A hardcoded inset clipped the top bar on devices
-// with taller status bars, so measure it instead.
-const ANDROID_STATUS_BAR_INSET = Platform.OS === 'android' ? (RNStatusBar.currentHeight ?? 24) : 0;
 // Prevents Number() overflow and unreadable layouts from pasted digit strings.
 const MAX_AMOUNT_DIGITS = 12;
 const isLocalWebPreview = Platform.OS === 'web'
@@ -280,11 +278,17 @@ function CategoryBadge({ category, size = 48 }: { category?: ExpenseCategory; si
 }
 
 function DongoApp() {
+  const insets = useSafeAreaInsets();
   const { keyboardVisible, keyboardInset, windowHeight } = useKeyboardInset();
+  // Edge-to-edge means the system navigation bar sits on top of the app, so the
+  // bottom inset has to be reserved by hand or content hides underneath it.
+  // When the keyboard is up it already covers that area, so take the larger of
+  // the two rather than stacking them.
+  const bottomInset = Math.max(keyboardInset, insets.bottom);
   // Sheets are anchored to the bottom, so they have to give the keyboard its
   // space explicitly; a fixed height keeps the internal ScrollView scrollable
   // instead of letting percentage heights re-resolve on every keyboard frame.
-  const sheetHeight = Math.round(Math.min(windowHeight * 0.92, windowHeight - keyboardInset));
+  const sheetHeight = Math.round(Math.min(windowHeight * 0.92, windowHeight - bottomInset));
   const [fontsLoaded] = useFonts({
     Estedad_400Regular,
     Estedad_500Medium,
@@ -314,6 +318,8 @@ function DongoApp() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payments, setPayments] = useState<SettlementPayment[]>([]);
   const [selectedExpense, setSelectedExpense] = useState<Expense | null>(null);
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [deleteExpenseTarget, setDeleteExpenseTarget] = useState<Expense | null>(null);
   const [expenseFilter, setExpenseFilter] = useState<'all' | 'week' | 'mine'>('all');
   const [tab, setTab] = useState<'home' | 'expenses' | 'settlement' | 'account'>('home');
   const [expenseModal, setExpenseModal] = useState(false);
@@ -569,10 +575,11 @@ function DongoApp() {
     if (finishModal) { setFinishModal(false); return true; }
     if (notificationsModal) { setNotificationsModal(false); return true; }
     if (expenseDetailsModal) { setExpenseDetailsModal(false); return true; }
-    if (expenseModal) { setExpenseModal(false); return true; }
+    if (expenseModal) { setExpenseModal(false); setEditingExpense(null); return true; }
     if (memberModal) { setMemberModal(false); return true; }
     if (editMemberModal) { setEditMemberModal(false); return true; }
     if (deleteStoryModal) { setDeleteStoryModal(false); return true; }
+    if (deleteExpenseTarget) { setDeleteExpenseTarget(null); return true; }
     if (pendingTransfer) { setPendingTransfer(null); return true; }
     if (tab !== 'home') { setTab('home'); return true; }
     if (!storiesHome) { setStoriesHome(true); return true; }
@@ -581,7 +588,7 @@ function DongoApp() {
 
   const canGoBackInApp = ownerFamilyModal || storyModal || joinModal || storySwitcher || finishModal || notificationsModal
     || expenseDetailsModal || expenseModal || memberModal || editMemberModal || deleteStoryModal
-    || Boolean(pendingTransfer) || tab !== 'home' || !storiesHome;
+    || Boolean(pendingTransfer) || Boolean(deleteExpenseTarget) || tab !== 'home' || !storiesHome;
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -595,7 +602,7 @@ function DongoApp() {
       return true;
     });
     return () => subscription.remove();
-  }, [ownerFamilyModal, storyModal, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, pendingTransfer, tab, storiesHome]);
+  }, [ownerFamilyModal, storyModal, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, pendingTransfer, deleteExpenseTarget, tab, storiesHome]);
 
   useEffect(() => {
     if (!storyId) return;
@@ -608,11 +615,90 @@ function DongoApp() {
     return <View style={styles.loading}><StatusBar style="dark" /></View>;
   }
 
+  /** The auth user behind the member card marked "me" in this story. */
+  const currentUserId = currentMember?.userId;
+
+  function expenseAuthorName(expense: Expense) {
+    if (!expense.createdById) return '';
+    const author = members.find((member) => member.userId === expense.createdById);
+    if (!author) return 'یکی از اعضا';
+    return author.isMe ? 'تو' : author.name;
+  }
+
+  function canEditExpense(expense: Expense) {
+    return Boolean(expense.createdById && currentUserId && expense.createdById === currentUserId) && !storyCompleted;
+  }
+
+  /**
+   * Rebuilds the sheet state from a stored expense. Allocations are saved per
+   * account with the participating person names in the label, so the people are
+   * recoverable; a member's total is then spread over its own people.
+   */
+  function openExpenseEditor(expense: Expense) {
+    if (!canEditExpense(expense)) return;
+    const chosenIds: string[] = [];
+    const nextShares: Record<string, string> = {};
+    const nextItems: Record<string, string> = {};
+
+    for (const allocation of expense.allocations ?? []) {
+      const people = expensePeople.filter((person) => person.memberId === allocation.memberId);
+      if (!people.length) continue;
+      const participants = matchAllocationParticipants(allocation.label, people);
+      const perPerson = allocateByWeight(allocation.amount, participants.map(({ person }) => ({ memberId: person.id, weight: 1 })));
+      for (const { person, item } of participants) {
+        chosenIds.push(person.id);
+        nextShares[person.id] = String(perPerson.find((entry) => entry.memberId === person.id)?.amount ?? 0);
+        if (item) nextItems[person.id] = item;
+      }
+    }
+
+    const amounts = chosenIds.map((id) => Number(nextShares[id] ?? 0));
+    // An equal split only ever differs by the rounding remainder.
+    const looksEqual = amounts.length > 0 && Math.max(...amounts) - Math.min(...amounts) <= 1;
+
+    setEditingExpense(expense);
+    setTitle(expense.title);
+    setAmount(String(Math.round(expense.amount)));
+    setCategory(expense.category ?? 'food');
+    setPayerId(expense.payerId);
+    setSelectedPersonIds(chosenIds);
+    setShareInputs(nextShares);
+    setItemLabels(nextItems);
+    setSplitMode(Object.keys(nextItems).length ? 'itemized' : looksEqual ? 'equal' : 'custom');
+    setExpenseDetailsModal(false);
+    setExpenseModal(true);
+  }
+
+  async function deleteExpense(expense: Expense) {
+    if (!storyId || cloudBusy) return;
+    if (isLocalWebPreview) {
+      setExpenses((current) => current.filter((item) => item.id !== expense.id));
+      setDeleteExpenseTarget(null);
+      setExpenseDetailsModal(false);
+      showToast('هزینه آزمایشی حذف شد.');
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      await deleteOnlineExpense(expense.id);
+      await syncFromCloud(storyId);
+      setDeleteExpenseTarget(null);
+      setExpenseDetailsModal(false);
+      showToast('هزینه حذف شد و دنگ‌ها دوباره محاسبه شدند');
+      void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'حذف هزینه ناموفق بود');
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
   function openExpenseModal() {
     if (storyCompleted) {
       showToast('این ماجرا تمام شده و فقط برای مرور در دسترس است');
       return;
     }
+    setEditingExpense(null);
     setTitle('غذا');
     setAmount('');
     setCategory('food');
@@ -835,15 +921,29 @@ function DongoApp() {
     };
 
     if (isLocalWebPreview) {
-      const localExpense = { ...nextExpense, id: `local-expense-${Date.now()}` };
-      setExpenses((current) => [localExpense, ...current]);
+      // Mirrors the server trigger so the ownership controls are exercisable here.
+      const localExpense = { ...nextExpense, id: editingExpense?.id ?? `local-expense-${Date.now()}`, createdById: currentUserId };
+      setExpenses((current) => (editingExpense
+        ? current.map((item) => (item.id === editingExpense.id ? localExpense : item))
+        : [localExpense, ...current]));
+      setEditingExpense(null);
       setExpenseModal(false);
       setTab('home');
-      showToast('هزینه آزمایشی با اعضای انتخاب‌شده ثبت شد.');
+      showToast(editingExpense ? 'هزینه آزمایشی ویرایش شد.' : 'هزینه آزمایشی با اعضای انتخاب‌شده ثبت شد.');
       return;
     }
     setCloudBusy(true);
     try {
+      if (editingExpense) {
+        await updateOnlineExpense(editingExpense.id, nextExpense);
+        await syncFromCloud(storyId);
+        setEditingExpense(null);
+        setExpenseModal(false);
+        setTab('home');
+        showToast('هزینه ویرایش شد و دنگ‌ها دوباره محاسبه شدند');
+        void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        return;
+      }
       await createOnlineExpense(storyId, nextExpense);
       await syncFromCloud(storyId);
       setExpenseModal(false);
@@ -1057,6 +1157,7 @@ function DongoApp() {
           <AppText style={styles.expenseAmount}>{formatMoney(expense.amount)}</AppText>
           <AppText style={styles.expenseSplit}>سهم {faNumber.format(participantCount)} نفر</AppText>
         </View>
+        {canEditExpense(expense) && <Pencil size={13} color={C.faint} />}
         <ChevronLeft size={18} color={C.faint} />
       </Pressable>
     );
@@ -1333,7 +1434,7 @@ function DongoApp() {
 
   if (!storyName) {
     return (
-      <SafeAreaView style={styles.safeArea}>
+      <View style={[styles.safeArea, { paddingTop: insets.top }]}>
         <StatusBar style="dark" />
         <View style={styles.welcomeBrand}>
           <View style={styles.brandCopy}><AppText style={styles.brandName}>دنگودونگ</AppText><AppText style={styles.brandTagline}>خرج کن، راحت تسویه کن</AppText></View>
@@ -1364,7 +1465,7 @@ function DongoApp() {
         </ScrollView>}
 
         <Modal visible={storyModal} animationType="slide" transparent onRequestClose={() => setStoryModal(false)}>
-          <View style={[styles.modalBackdrop, { paddingBottom: keyboardInset }]}>
+          <View style={[styles.modalBackdrop, { paddingBottom: bottomInset }]}>
               <View style={[styles.storySheet, { height: sheetHeight }]} accessibilityViewIsModal>
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeader}>
@@ -1395,7 +1496,7 @@ function DongoApp() {
           </View>
         </Modal>
         <Modal visible={ownerFamilyModal} animationType="fade" transparent onRequestClose={() => { setOwnerFamilyModal(false); setStoryModal(true); }}>
-          <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.familySetupDialog} accessibilityViewIsModal>
               <View style={styles.familySetupHeader}><View style={styles.dialogIcon}><Users size={25} color={C.purple} /></View><View style={styles.familySetupCopy}><AppText style={styles.familyStepLabel}>مرحله ۲ از ۲</AppText><AppText style={styles.dialogTitle}>اعضای حساب تو</AppText><AppText style={styles.dialogTextCompact}>اسم‌ها باعث می‌شوند موقع ثبت خرج دقیقاً افراد حاضر را انتخاب کنی.</AppText></View></View>
               <View style={styles.familyHeadRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.familyHeadCopy}><AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText><AppText style={styles.familyHeadName}>{accountName.trim() || 'من (دارنده حساب)'}</AppText></View></View>
@@ -1408,7 +1509,7 @@ function DongoApp() {
           </ScrollView>
         </Modal>
         <Modal visible={joinModal} animationType="fade" transparent onRequestClose={() => setJoinModal(false)}>
-          <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.dialog} accessibilityViewIsModal>
               <View style={styles.dialogIcon}><UserPlus size={26} color={C.purple} /></View>
               <AppText style={styles.dialogTitle}>پیوستن به ماجرا</AppText>
@@ -1423,12 +1524,12 @@ function DongoApp() {
             </View>
           </ScrollView>
         </Modal>
-      </SafeAreaView>
+      </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       <StatusBar style="dark" />
       <View style={styles.topBar}>
         {canGoBackInApp ? (
@@ -1453,7 +1554,7 @@ function DongoApp() {
           </>
         )}
         {/* Extra room so account fields stay scrollable above the keyboard. */}
-        <View style={[styles.scrollEnd, keyboardVisible && { height: keyboardInset + 24 }]} />
+        <View style={{ height: (keyboardVisible ? keyboardInset : insets.bottom) + 118 }} />
       </ScrollView>
 
       {toast ? (
@@ -1465,7 +1566,7 @@ function DongoApp() {
 
       {/* The nav floats above the content, so with the keyboard up it would
           otherwise hover over the keyboard and cover the field being typed in. */}
-      {!keyboardVisible && <View style={styles.bottomNav}>
+      {!keyboardVisible && <View style={[styles.bottomNav, { bottom: insets.bottom + 10 }]}>
         <Pressable accessibilityRole="tab" accessibilityState={{ selected: storiesHome }} onPress={() => { setStoriesHome(true); setTab('home'); }} style={styles.navItem}>
           <View style={[styles.navIconWrap, storiesHome && styles.navIconWrapActive]}><Home size={21} color={storiesHome ? C.purple : C.faint} fill={storiesHome ? C.purplePale : 'transparent'} /></View>
           <AppText style={[styles.navLabel, storiesHome && styles.navLabelActive]}>ماجراها</AppText>
@@ -1489,7 +1590,7 @@ function DongoApp() {
       </View>}
 
       <Modal visible={storySwitcher} animationType="fade" transparent onRequestClose={() => setStorySwitcher(false)}>
-        <View style={styles.centeredBackdrop}>
+        <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.storySwitcherCard} accessibilityViewIsModal>
             <View style={styles.switcherHeader}>
               <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => setStorySwitcher(false)}><X size={20} color={C.ink} /></Pressable>
@@ -1516,7 +1617,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={notificationsModal} animationType="fade" transparent onRequestClose={() => setNotificationsModal(false)}>
-        <View style={styles.centeredBackdrop}>
+        <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.notificationsCard} accessibilityViewIsModal>
             <View style={styles.switcherHeader}>
               <Pressable accessibilityRole="button" accessibilityLabel="بستن اعلان‌ها" style={styles.sheetClose} onPress={() => setNotificationsModal(false)}><X size={20} color={C.ink} /></Pressable>
@@ -1543,7 +1644,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={expenseDetailsModal} animationType="fade" transparent onRequestClose={() => setExpenseDetailsModal(false)}>
-        <View style={styles.centeredBackdrop}>
+        <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.expenseDetailsCard} accessibilityViewIsModal>
             <View style={styles.switcherHeader}>
               <Pressable accessibilityRole="button" accessibilityLabel="بستن جزئیات هزینه" style={styles.sheetClose} onPress={() => setExpenseDetailsModal(false)}><X size={20} color={C.ink} /></Pressable>
@@ -1559,6 +1660,20 @@ function DongoApp() {
                   return <View key={allocation.memberId} style={styles.expenseAllocationRow}><Avatar member={member} size={39} /><View style={styles.expenseAllocationCopy}><AppText style={styles.expenseAllocationName}>{member?.isMe ? 'من' : member?.name}</AppText>{allocation.label && <AppText style={styles.expenseAllocationLabel}>{allocation.label}</AppText>}</View><AppText style={styles.expenseAllocationAmount}>{formatMoney(allocation.amount)}</AppText></View>;
                 })}
               </ScrollView>
+              <View style={styles.expenseAuthorRow}>
+                <View style={styles.expenseAuthorIcon}><UserRound size={15} color={C.purple} /></View>
+                <AppText style={styles.expenseAuthorText}>{selectedExpense.createdById
+                  ? `ثبت‌شده توسط ${expenseAuthorName(selectedExpense)}`
+                  : 'ثبت‌کننده این هزینه مشخص نیست'}</AppText>
+              </View>
+              {canEditExpense(selectedExpense) ? (
+                <View style={styles.expenseOwnerActions}>
+                  <Pressable accessibilityRole="button" disabled={cloudBusy} style={[styles.expenseDeleteButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => setDeleteExpenseTarget(selectedExpense)}><Trash2 size={17} color={C.debt} /><AppText style={styles.expenseDeleteText}>حذف</AppText></Pressable>
+                  <Pressable accessibilityRole="button" disabled={cloudBusy} style={[styles.expenseEditButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => openExpenseEditor(selectedExpense)}><Pencil size={17} color="#FFFFFF" /><AppText style={styles.expenseEditText}>ویرایش هزینه</AppText></Pressable>
+                </View>
+              ) : selectedExpense.createdById ? (
+                <AppText style={styles.expenseOwnerHint}>فقط {expenseAuthorName(selectedExpense)} می‌تواند این هزینه را ویرایش یا حذف کند.</AppText>
+              ) : null}
               <Pressable accessibilityRole="button" style={styles.expenseDetailsCloseButton} onPress={() => setExpenseDetailsModal(false)}><AppText style={styles.expenseDetailsCloseText}>متوجه شدم</AppText></Pressable>
             </>}
           </View>
@@ -1566,7 +1681,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={storyModal} animationType="slide" transparent onRequestClose={() => setStoryModal(false)}>
-        <View style={[styles.modalBackdrop, { paddingBottom: keyboardInset }]}>
+        <View style={[styles.modalBackdrop, { paddingBottom: bottomInset }]}>
           <View style={[styles.storySheet, { height: sheetHeight }]} accessibilityViewIsModal>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
@@ -1599,7 +1714,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={ownerFamilyModal} animationType="fade" transparent onRequestClose={() => { setOwnerFamilyModal(false); setStoryModal(true); }}>
-        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.familySetupDialog} accessibilityViewIsModal>
             <View style={styles.familySetupHeader}><View style={styles.dialogIcon}><Users size={25} color={C.purple} /></View><View style={styles.familySetupCopy}><AppText style={styles.familyStepLabel}>مرحله ۲ از ۲</AppText><AppText style={styles.dialogTitle}>اعضای حساب تو</AppText><AppText style={styles.dialogTextCompact}>اسم‌ها باعث می‌شوند موقع ثبت خرج دقیقاً افراد حاضر را انتخاب کنی.</AppText></View></View>
             <View style={styles.familyHeadRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.familyHeadCopy}><AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText><AppText style={styles.familyHeadName}>{accountName.trim() || 'من (دارنده حساب)'}</AppText></View></View>
@@ -1613,7 +1728,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={finishModal} animationType="fade" transparent onRequestClose={() => setFinishModal(false)}>
-        <View style={styles.centeredBackdrop}>
+        <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.finishDialogIcon}><Check size={29} color={C.mintDark} /></View>
             <AppText style={styles.dialogTitle}>ماجرا تموم شد؟</AppText>
@@ -1633,7 +1748,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={deleteStoryModal} animationType="fade" transparent onRequestClose={() => setDeleteStoryModal(false)}>
-        <View style={styles.centeredBackdrop}>
+        <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.deleteDialogIcon}><AlertTriangle size={29} color={C.debt} /></View>
             <AppText style={styles.dialogTitle}>این ماجرا حذف شود؟</AppText>
@@ -1647,8 +1762,27 @@ function DongoApp() {
         </View>
       </Modal>
 
+      <Modal visible={Boolean(deleteExpenseTarget)} animationType="fade" transparent onRequestClose={() => setDeleteExpenseTarget(null)}>
+        <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
+          <View style={styles.finishDialog} accessibilityViewIsModal>
+            <View style={styles.deleteDialogIcon}><AlertTriangle size={29} color={C.debt} /></View>
+            <AppText style={styles.dialogTitle}>این هزینه حذف شود؟</AppText>
+            <AppText style={styles.finishDialogText}>
+              {deleteExpenseTarget
+                ? `«${deleteExpenseTarget.title}» به مبلغ ${formatMoney(deleteExpenseTarget.amount)} حذف می‌شود و دنگ همه اعضا دوباره محاسبه خواهد شد.`
+                : ''}
+            </AppText>
+            <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>این عملیات برگشت‌پذیر نیست.</AppText></View>
+            <View style={styles.dialogActions}>
+              <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setDeleteExpenseTarget(null)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (deleteExpenseTarget) void deleteExpense(deleteExpenseTarget); }}><Trash2 size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال حذف…' : 'بله، حذف کن'}</AppText></Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={Boolean(pendingTransfer)} animationType="fade" transparent onRequestClose={() => setPendingTransfer(null)}>
-        <View style={styles.centeredBackdrop}>
+        <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.finishDialogIcon}><HandCoins size={28} color={C.mintDark} /></View>
             <AppText style={styles.dialogTitle}>این پرداخت انجام شد؟</AppText>
@@ -1667,7 +1801,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={editMemberModal} animationType="fade" transparent onRequestClose={() => setEditMemberModal(false)}>
-        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Pencil size={24} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>ویرایش عضو</AppText>
@@ -1683,13 +1817,13 @@ function DongoApp() {
         </ScrollView>
       </Modal>
 
-      <Modal visible={expenseModal} animationType="slide" transparent onRequestClose={() => setExpenseModal(false)}>
-        <View style={[styles.modalBackdrop, { paddingBottom: keyboardInset }]}>
+      <Modal visible={expenseModal} animationType="slide" transparent onRequestClose={() => { setExpenseModal(false); setEditingExpense(null); }}>
+        <View style={[styles.modalBackdrop, { paddingBottom: bottomInset }]}>
           <View style={[styles.sheet, { height: sheetHeight }]} accessibilityViewIsModal>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
-              <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => setExpenseModal(false)}><X size={21} color={C.ink} /></Pressable>
-              <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>خرج جدید</AppText><AppText style={styles.sheetSubtitle}>اول مبلغ، بعد جزئیات ساده</AppText></View>
+              <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => { setExpenseModal(false); setEditingExpense(null); }}><X size={21} color={C.ink} /></Pressable>
+              <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>{editingExpense ? 'ویرایش خرج' : 'خرج جدید'}</AppText><AppText style={styles.sheetSubtitle}>{editingExpense ? 'تغییرات روی دنگ همه اعضا اثر می‌گذارد' : 'اول مبلغ، بعد جزئیات ساده'}</AppText></View>
               <View style={styles.sheetSpark}><Sparkles size={20} color={C.purple} /></View>
             </View>
 
@@ -1786,7 +1920,7 @@ function DongoApp() {
             <View style={styles.sheetFooter}>
               <View style={styles.footerPreview}><AppText style={styles.footerPreviewLabel}>{splitMode === 'equal' ? 'مجموع سهم' : 'جمع سهم‌ها'}</AppText><AppText style={styles.footerPreviewValue}>{splitMode === 'equal' ? `${faNumber.format(selectedShareUnits)} سهم` : formatMoney(enteredShareTotal)}</AppText></View>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: !isExpenseValid }} disabled={!isExpenseValid} onPress={addExpense} style={({ pressed }) => [styles.saveButton, !isExpenseValid && styles.saveButtonDisabled, pressed && isExpenseValid && styles.pressed]}>
-                <Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ثبت و محاسبه دنگ</AppText>
+                <Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>{editingExpense ? 'ذخیره تغییرات' : 'ثبت و محاسبه دنگ'}</AppText>
               </Pressable>
             </View>
           </View>
@@ -1794,7 +1928,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={memberModal} animationType="fade" transparent onRequestClose={() => setMemberModal(false)}>
-        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Users size={26} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>عضو جدید</AppText>
@@ -1830,7 +1964,7 @@ function DongoApp() {
       </Modal>
 
       <Modal visible={joinModal} animationType="fade" transparent onRequestClose={() => setJoinModal(false)}>
-        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + keyboardInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><UserPlus size={26} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>پیوستن به ماجرا</AppText>
@@ -1845,14 +1979,14 @@ function DongoApp() {
           </View>
         </ScrollView>
       </Modal>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   defaultText: { fontFamily: F.regular, color: C.ink, writingDirection: 'rtl' },
   loading: { flex: 1, backgroundColor: C.canvas },
-  safeArea: { flex: 1, backgroundColor: C.canvas, paddingTop: ANDROID_STATUS_BAR_INSET },
+  safeArea: { flex: 1, backgroundColor: C.canvas },
   topBar: { height: 72, paddingHorizontal: 18, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.canvas },
   iconButton: { width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.paper, borderWidth: 1, borderColor: C.line },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -1961,8 +2095,7 @@ const styles = StyleSheet.create({
   emptyMascot: { width: 120, height: 120 },
   emptyTitle: { fontFamily: F.extra, fontSize: 17 },
   emptyText: { fontFamily: F.medium, fontSize: 11, color: C.muted, marginTop: 4 },
-  scrollEnd: { height: Platform.OS === 'android' ? 142 : 112 },
-  bottomNav: { position: 'absolute', left: 12, right: 12, bottom: Platform.OS === 'android' ? 32 : 10, height: 78, backgroundColor: C.paper, borderRadius: 25, flexDirection: 'row-reverse', alignItems: 'center', paddingHorizontal: 7, borderWidth: 1, borderColor: C.line, shadowColor: C.ink, shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
+  bottomNav: { position: 'absolute', left: 12, right: 12, height: 78, backgroundColor: C.paper, borderRadius: 25, flexDirection: 'row-reverse', alignItems: 'center', paddingHorizontal: 7, borderWidth: 1, borderColor: C.line, shadowColor: C.ink, shadowOpacity: 0.12, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 10 },
   navItem: { flex: 1, minHeight: 60, alignItems: 'center', justifyContent: 'center' },
   navIconWrap: { width: 38, height: 30, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
   navIconWrapActive: { backgroundColor: C.purplePale },
@@ -2267,6 +2400,15 @@ const styles = StyleSheet.create({
   expenseAllocationName: { fontFamily: F.bold, fontSize: 10 },
   expenseAllocationLabel: { fontFamily: F.medium, color: C.muted, fontSize: 8, marginTop: 2 },
   expenseAllocationAmount: { fontFamily: F.extra, fontSize: 10 },
+  expenseAuthorRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginTop: 14, paddingTop: 13, borderTopWidth: 1, borderTopColor: C.line },
+  expenseAuthorIcon: { width: 28, height: 28, borderRadius: 10, backgroundColor: C.purplePale, alignItems: 'center', justifyContent: 'center' },
+  expenseAuthorText: { flex: 1, fontFamily: F.semi, fontSize: 11, color: C.muted, textAlign: 'right' },
+  expenseOwnerActions: { flexDirection: 'row', gap: 9, marginTop: 12 },
+  expenseEditButton: { flex: 1.4, minHeight: 48, borderRadius: 16, backgroundColor: C.purple, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  expenseEditText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 12 },
+  expenseDeleteButton: { flex: 1, minHeight: 48, borderRadius: 16, backgroundColor: C.debtPale, borderWidth: 1, borderColor: '#F3C9D2', flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  expenseDeleteText: { fontFamily: F.bold, color: C.debt, fontSize: 12 },
+  expenseOwnerHint: { fontFamily: F.medium, fontSize: 10, color: C.faint, textAlign: 'right', marginTop: 9, lineHeight: 18 },
   expenseDetailsCloseButton: { minHeight: 50, borderRadius: 16, backgroundColor: C.ink, alignItems: 'center', justifyContent: 'center', marginTop: 15 },
   expenseDetailsCloseText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 11 },
   memberModeTabs: { width: '100%', flexDirection: 'row-reverse', backgroundColor: C.purplePale, borderRadius: 15, padding: 4, marginVertical: 12 },
@@ -2289,8 +2431,10 @@ const styles = StyleSheet.create({
 
 export default function App() {
   return (
-    <AuthGate>
-      <DongoApp />
-    </AuthGate>
+    <SafeAreaProvider>
+      <AuthGate>
+        <DongoApp />
+      </AuthGate>
+    </SafeAreaProvider>
   );
 }

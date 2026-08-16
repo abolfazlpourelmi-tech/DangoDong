@@ -39,7 +39,7 @@ export async function loadOnlineStories(): Promise<OnlineStory[]> {
   const storyIds = storyRows.map((row) => row.id);
   const [{ data: memberRows, error: memberError }, { data: expenseRows, error: expenseError }, { data: settlementRows, error: settlementError }] = await Promise.all([
     supabase.from('story_members').select('id, story_id, user_id, share_units, member_kind, display_name, household_members, joined_at').in('story_id', storyIds),
-    supabase.from('expenses').select('id, story_id, title, amount, category, paid_by, participant_person_count, created_at').in('story_id', storyIds).order('created_at', { ascending: false }),
+    supabase.from('expenses').select('id, story_id, title, amount, category, paid_by, participant_person_count, created_at, created_by').in('story_id', storyIds).order('created_at', { ascending: false }),
     supabase.from('settlements').select('id, story_id, from_member_id, to_member_id, amount, status, paid_at, created_at').in('story_id', storyIds),
   ]);
   if (memberError) throw memberError;
@@ -94,6 +94,7 @@ export async function loadOnlineStories(): Promise<OnlineStory[]> {
         category: row.category,
         createdAt: relativeTime(row.created_at),
         createdAtISO: row.created_at ?? undefined,
+        createdById: row.created_by ?? undefined,
         participantPersonCount: Math.max(1, Number(row.participant_person_count ?? 1)),
         allocations: (shareRows ?? []).filter((share) => share.expense_id === row.id).map((share) => ({
           memberId: share.member_id,
@@ -214,6 +215,30 @@ export async function createOnlineExpense(storyId: string, expense: Expense) {
   });
   if (participantCountError) throw participantCountError;
   return data as string;
+}
+
+export async function updateOnlineExpense(expenseId: string, expense: Expense) {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('update_story_expense', {
+    target_expense_id: expenseId,
+    expense_title: expense.title,
+    expense_amount: expense.amount,
+    expense_category: expense.category ?? 'other',
+    payer_member_id: expense.payerId,
+    allocations: (expense.allocations ?? []).map((allocation) => ({
+      member_id: allocation.memberId,
+      amount: allocation.amount,
+      label: allocation.label ?? null,
+    })),
+    person_count: Math.max(1, Math.round(expense.participantPersonCount ?? expense.allocations?.length ?? 1)),
+  });
+  if (error) throw error;
+}
+
+export async function deleteOnlineExpense(expenseId: string) {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('delete_story_expense', { target_expense_id: expenseId });
+  if (error) throw error;
 }
 
 export async function completeOnlineStory(storyId: string) {

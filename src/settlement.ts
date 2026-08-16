@@ -21,6 +21,8 @@ export type Expense = {
   createdAt: string;
   /** Raw ISO timestamp from the server; used for time-based filters. */
   createdAtISO?: string;
+  /** auth user id of whoever recorded it; only they may edit or delete it. */
+  createdById?: string;
   category?: ExpenseCategory;
   participantPersonCount?: number;
 };
@@ -59,6 +61,28 @@ export function isFromLastWeek(expense: Expense, now: number = Date.now()): bool
   const createdAt = new Date(expense.createdAtISO).getTime();
   if (Number.isNaN(createdAt)) return true;
   return now - createdAt <= WEEK_IN_MS;
+}
+
+/**
+ * Allocations are stored per account, with the participating person names kept
+ * in the label ("سارا، مهدی" or "سارا: پاستا"). Editing an expense has to turn
+ * that label back into the people it came from. If the label carries nothing
+ * usable, every person on the account is assumed to have taken part.
+ */
+export function matchAllocationParticipants<T extends { id: string; name: string }>(
+  label: string | undefined,
+  people: T[],
+): Array<{ person: T; item?: string }> {
+  const parts = (label ?? '').split('،').map((part) => part.trim()).filter(Boolean);
+  if (!parts.length) return people.map((person) => ({ person }));
+
+  const matched = people.flatMap((person) => {
+    const itemPart = parts.find((part) => part.startsWith(`${person.name}: `));
+    if (itemPart) return [{ person, item: itemPart.slice(person.name.length + 2) }];
+    return parts.includes(person.name) ? [{ person }] : [];
+  });
+
+  return matched.length ? matched : people.map((person) => ({ person }));
 }
 
 export function allocateByWeight(
