@@ -21,6 +21,7 @@ import {
   SafeAreaView,
   Share,
   ScrollView,
+  StatusBar as RNStatusBar,
   StyleSheet,
   Text,
   TextInput,
@@ -32,6 +33,7 @@ import {
   applySettlementPayments,
   calculateBalances,
   createSettlement,
+  isFromLastWeek,
   type Expense,
   type ExpenseCategory,
   type Member,
@@ -117,6 +119,12 @@ const F = {
 };
 
 const AVATAR_COLORS = ['#6652D9', '#FF7A6B', '#4FC7A4', '#F0A83A', '#4E82D8', '#A95AC2'];
+// The app draws its own top bar and runs edge-to-edge on Android, where
+// SafeAreaView is a no-op. A hardcoded inset clipped the top bar on devices
+// with taller status bars, so measure it instead.
+const ANDROID_STATUS_BAR_INSET = Platform.OS === 'android' ? (RNStatusBar.currentHeight ?? 24) : 0;
+// Prevents Number() overflow and unreadable layouts from pasted digit strings.
+const MAX_AMOUNT_DIGITS = 12;
 const isLocalWebPreview = Platform.OS === 'web'
   && typeof window !== 'undefined'
   && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
@@ -274,7 +282,6 @@ function DongoApp() {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState<ExpenseCategory>('food');
   const [payerId, setPayerId] = useState('');
-  const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
   const [splitMode, setSplitMode] = useState<SplitMode>('equal');
   const [shareInputs, setShareInputs] = useState<Record<string, string>>({});
@@ -288,6 +295,8 @@ function DongoApp() {
   const [editHouseholdNameInputs, setEditHouseholdNameInputs] = useState<string[]>([]);
   const activeStoryIdRef = useRef('');
   const [toast, setToast] = useState('');
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [pendingTransfer, setPendingTransfer] = useState<Transfer | null>(null);
   const [accountName, setAccountName] = useState('');
   const [accountCardNumber, setAccountCardNumber] = useState('');
   const [accountPhone, setAccountPhone] = useState('');
@@ -344,9 +353,12 @@ function DongoApp() {
       return [];
     });
   }), [stories]);
-  const filteredExpenses = expenses.filter((expense) => (
-    expenseFilter === 'mine' ? expense.payerId === currentMember?.id : true
-  ));
+  const filteredExpenses = expenses.filter((expense) => {
+    if (expenseFilter === 'mine') return expense.payerId === currentMember?.id;
+    if (expenseFilter === 'week') return isFromLastWeek(expense);
+    return true;
+  });
+  const filteredTotal = filteredExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
   function hydrateActiveStory(story: Story) {
     setStoryId(story.id);
@@ -357,7 +369,6 @@ function DongoApp() {
     setPayments(story.payments ?? []);
     const me = story.members.find((member) => member.isMe) ?? story.members[0];
     setPayerId(me?.id ?? '');
-    setSelectedIds(story.members.map((member) => member.id));
     const people = story.members.flatMap((member) => Array.from(
       { length: Math.max(1, member.shareUnits ?? 1) },
       (_, index) => `${member.id}::${index}`,
@@ -459,6 +470,9 @@ function DongoApp() {
       return;
     }
     showToast('اطلاعات حساب ذخیره شد');
+    // Member names in every story come from the profile row, so refresh them
+    // instead of leaving the old name on screen until the next unrelated sync.
+    void syncFromCloud();
   }
 
   async function signOut() {
@@ -488,6 +502,10 @@ function DongoApp() {
 
   useEffect(() => { void loadAccount(); }, []);
 
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
+
   useEffect(() => {
     if (Platform.OS === 'android') {
       void preloadExpenseInterstitial();
@@ -507,6 +525,7 @@ function DongoApp() {
     if (memberModal) { setMemberModal(false); return true; }
     if (editMemberModal) { setEditMemberModal(false); return true; }
     if (deleteStoryModal) { setDeleteStoryModal(false); return true; }
+    if (pendingTransfer) { setPendingTransfer(null); return true; }
     if (tab !== 'home') { setTab('home'); return true; }
     if (!storiesHome) { setStoriesHome(true); return true; }
     return false;
@@ -514,7 +533,7 @@ function DongoApp() {
 
   const canGoBackInApp = ownerFamilyModal || storyModal || joinModal || storySwitcher || finishModal || notificationsModal
     || expenseDetailsModal || expenseModal || memberModal || editMemberModal || deleteStoryModal
-    || tab !== 'home' || !storiesHome;
+    || Boolean(pendingTransfer) || tab !== 'home' || !storiesHome;
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -528,7 +547,7 @@ function DongoApp() {
       return true;
     });
     return () => subscription.remove();
-  }, [ownerFamilyModal, storyModal, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, tab, storiesHome]);
+  }, [ownerFamilyModal, storyModal, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, pendingTransfer, tab, storiesHome]);
 
   useEffect(() => {
     if (!storyId) return;
@@ -550,7 +569,6 @@ function DongoApp() {
     setAmount('');
     setCategory('food');
     setPayerId(currentMember?.id ?? members[0]?.id ?? '');
-    setSelectedIds(members.map((member) => member.id));
     setSelectedPersonIds(members.map((member) => `${member.id}::0`));
     setSplitMode('equal');
     setShareInputs({});
@@ -640,6 +658,8 @@ function DongoApp() {
 
   function switchStory(story: Story) {
     hydrateActiveStory(story);
+    // A filter left over from the previous story silently hides expenses here.
+    setExpenseFilter('all');
     setTab('home');
     setStoriesHome(false);
     setStorySwitcher(false);
@@ -672,13 +692,6 @@ function DongoApp() {
     void Haptics.selectionAsync();
   }
 
-  function toggleParticipant(id: string) {
-    setSelectedIds((current) => (
-      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
-    ));
-    void Haptics.selectionAsync();
-  }
-
   function toggleExpensePerson(id: string) {
     setSelectedPersonIds((current) => (
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
@@ -687,8 +700,14 @@ function DongoApp() {
   }
 
   function showToast(message: string) {
+    // Without clearing the previous timer, a second toast inherits the first
+    // one's countdown and can vanish almost immediately.
+    if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast(message);
-    setTimeout(() => setToast(''), 2800);
+    toastTimer.current = setTimeout(() => {
+      toastTimer.current = null;
+      setToast('');
+    }, 2800);
   }
 
   function openNotification(item: AccountNotification) {
@@ -704,6 +723,7 @@ function DongoApp() {
     try {
       await recordOnlinePayment(storyId, transfer);
       await syncFromCloud(storyId);
+      setPendingTransfer(null);
       showToast('پرداخت آنلاین ثبت شد و مانده‌حساب‌ها به‌روز شدند');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
@@ -1072,7 +1092,7 @@ function DongoApp() {
               <AppText style={styles.heroTagText}>وضعیت حساب تو</AppText>
             </View>
             <AppText style={styles.heroLabel}>{positive ? 'در این ماجرا طلب داری' : 'در این ماجرا بدهکاری'}</AppText>
-            <AppText style={styles.heroAmount}>{formatMoney(Math.abs(currentBalance))}</AppText>
+            <AppText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={styles.heroAmount}>{formatMoney(Math.abs(currentBalance))}</AppText>
             <AppText style={styles.heroHint}>{positive ? 'طلب‌هات برای این ماجرا اینجا جمع می‌شن ✨' : 'نگران نباش؛ آخر ماجرا یک‌جا تسویه کن'}</AppText>
           </View>
           <Image source={require('./assets/dong-mascot-optimized.png')} style={styles.heroMascot} resizeMode="contain" />
@@ -1160,7 +1180,9 @@ function DongoApp() {
           <View style={styles.pageIcon}><ReceiptText size={26} color={C.purple} /></View>
           <View style={styles.pageIntroCopy}>
             <AppText style={styles.pageTitle}>هزینه‌های ماجرا</AppText>
-            <AppText style={styles.pageSubtitle}>{faNumber.format(expenses.length)} هزینه · جمعاً {formatMoney(total)}</AppText>
+            <AppText style={styles.pageSubtitle}>{expenseFilter === 'all'
+              ? `${faNumber.format(expenses.length)} هزینه · جمعاً ${formatMoney(total)}`
+              : `${faNumber.format(filteredExpenses.length)} از ${faNumber.format(expenses.length)} هزینه · ${formatMoney(filteredTotal)}`}</AppText>
           </View>
         </View>
         <View style={styles.filterRow}>
@@ -1175,11 +1197,15 @@ function DongoApp() {
         </View>
         <View style={styles.dateTitleRow}>
           <View style={styles.dateLine} />
-          <AppText style={styles.dateTitle}>فعالیت‌های اخیر</AppText>
+          <AppText style={styles.dateTitle}>{expenseFilter === 'week' ? 'هفت روز گذشته' : 'فعالیت‌های اخیر'}</AppText>
           <View style={styles.dateLine} />
         </View>
         <View style={styles.expenseList}>{filteredExpenses.length ? filteredExpenses.map(renderExpense) : (
-          <View style={styles.inlineEmpty}><AppText style={styles.inlineEmptyTitle}>هزینه‌ای در این فیلتر نیست</AppText><AppText style={styles.inlineEmptyText}>{expenseFilter === 'mine' ? 'هنوز پرداختی با حساب تو ثبت نشده.' : 'با دکمه «هزینه جدید» شروع کن.'}</AppText></View>
+          <View style={styles.inlineEmpty}><AppText style={styles.inlineEmptyTitle}>هزینه‌ای در این فیلتر نیست</AppText><AppText style={styles.inlineEmptyText}>{expenseFilter === 'mine'
+            ? 'هنوز پرداختی با حساب تو ثبت نشده.'
+            : expenseFilter === 'week'
+              ? 'در هفت روز گذشته هزینه‌ای ثبت نشده؛ فیلتر «همه» را ببین.'
+              : 'با دکمه «خرج جدید» شروع کن.'}</AppText></View>
         )}</View>
       </>
     );
@@ -1241,7 +1267,7 @@ function DongoApp() {
                 </View>
                 <View style={styles.transferDivider} />
                 <View style={styles.transferFooter}>
-                  <Pressable accessibilityRole="button" style={styles.paidButton} onPress={() => markTransferPaid(transfer)}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`ثبت پرداخت ${formatMoney(transfer.amount)} از ${from?.name} به ${to?.name}`} accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.paidButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => setPendingTransfer(transfer)}>
                     <Check size={16} color={C.purple} /><AppText style={styles.paidButtonText}>پرداخت کردم</AppText>
                   </Pressable>
                   <View style={styles.transferAmountBox}>
@@ -1550,7 +1576,7 @@ function DongoApp() {
             {transfers.length > 0 && <View style={styles.finishWarning}><AppText style={styles.finishWarningText}>تسویه‌ها هنوز باقی مانده‌اند؛ بعداً هم می‌توانی آن‌ها را از صفحه تسویه ببینی.</AppText></View>}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setFinishModal(false)}><AppText style={styles.dialogCancelText}>فعلاً نه</AppText></Pressable>
-              <Pressable accessibilityRole="button" style={styles.finishConfirmButton} onPress={finishStory}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>بله، تمامش کن</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.finishConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={finishStory}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال بستن…' : 'بله، تمامش کن'}</AppText></Pressable>
             </View>
           </View>
         </View>
@@ -1566,6 +1592,25 @@ function DongoApp() {
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setDeleteStoryModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={deleteStory}><Trash2 size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>بله، حذف کن</AppText></Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={Boolean(pendingTransfer)} animationType="fade" transparent onRequestClose={() => setPendingTransfer(null)}>
+        <View style={styles.centeredBackdrop}>
+          <View style={styles.finishDialog} accessibilityViewIsModal>
+            <View style={styles.finishDialogIcon}><HandCoins size={28} color={C.mintDark} /></View>
+            <AppText style={styles.dialogTitle}>این پرداخت انجام شد؟</AppText>
+            <AppText style={styles.finishDialogText}>
+              {pendingTransfer
+                ? `ثبت می‌شود که «${memberById(pendingTransfer.fromId)?.name ?? ''}» مبلغ ${formatMoney(pendingTransfer.amount)} را به «${memberById(pendingTransfer.toId)?.name ?? ''}» پرداخت کرده و مانده‌حساب همه اعضا به‌روز می‌شود.`
+                : ''}
+            </AppText>
+            <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>این ثبت برای همه اعضای ماجرا دیده می‌شود و خودت نمی‌توانی آن را پس بگیری.</AppText></View>
+            <View style={styles.dialogActions}>
+              <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setPendingTransfer(null)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.finishConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (pendingTransfer) void markTransferPaid(pendingTransfer); }}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال ثبت…' : 'بله، ثبت کن'}</AppText></Pressable>
             </View>
           </View>
         </View>
@@ -1607,7 +1652,7 @@ function DongoApp() {
                     accessibilityLabel="مبلغ هزینه به تومان"
                     style={styles.amountInput}
                     value={amount ? faNumber.format(Number(amount)) : ''}
-                    onChangeText={(value) => setAmount(normalizeDigits(value).replace(/^0+/, ''))}
+                    onChangeText={(value) => setAmount(normalizeDigits(value).replace(/^0+/, '').slice(0, MAX_AMOUNT_DIGITS))}
                     placeholder="۰"
                     placeholderTextColor="#B9B1C1"
                     keyboardType="number-pad"
@@ -1679,7 +1724,7 @@ function DongoApp() {
                       <View style={styles.personShareIdentity}><View style={styles.personMiniAvatar}><AppText style={styles.personMiniAvatarText}>{initials(person.name)}</AppText></View><AppText style={styles.personShareName}>{person.name}</AppText></View>
                       <View style={styles.shareFields}>
                         {splitMode === 'itemized' && <TextInput value={itemLabels[person.id] ?? ''} onChangeText={(value) => setItemLabels((current) => ({ ...current, [person.id]: value }))} style={styles.itemLabelInput} placeholder="مثلاً پاستا" placeholderTextColor={C.faint} textAlign="right" />}
-                        <View style={styles.shareAmountWrap}><AppText style={styles.shareUnit}>تومان</AppText><TextInput value={shareInputs[person.id] ? faNumber.format(Number(shareInputs[person.id])) : ''} onChangeText={(value) => setShareInputs((current) => ({ ...current, [person.id]: normalizeDigits(value).replace(/^0+/, '') }))} style={styles.shareAmountInput} placeholder="۰" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="right" /></View>
+                        <View style={styles.shareAmountWrap}><AppText style={styles.shareUnit}>تومان</AppText><TextInput value={shareInputs[person.id] ? faNumber.format(Number(shareInputs[person.id])) : ''} onChangeText={(value) => setShareInputs((current) => ({ ...current, [person.id]: normalizeDigits(value).replace(/^0+/, '').slice(0, MAX_AMOUNT_DIGITS) }))} style={styles.shareAmountInput} placeholder="۰" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="right" /></View>
                       </View>
                     </View>)}
                   </View>)}
@@ -1757,7 +1802,7 @@ function DongoApp() {
 const styles = StyleSheet.create({
   defaultText: { fontFamily: F.regular, color: C.ink, writingDirection: 'rtl' },
   loading: { flex: 1, backgroundColor: C.canvas },
-  safeArea: { flex: 1, backgroundColor: C.canvas, paddingTop: Platform.OS === 'android' ? 24 : 0 },
+  safeArea: { flex: 1, backgroundColor: C.canvas, paddingTop: ANDROID_STATUS_BAR_INSET },
   topBar: { height: 72, paddingHorizontal: 18, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.canvas },
   iconButton: { width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.paper, borderWidth: 1, borderColor: C.line },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -1766,16 +1811,19 @@ const styles = StyleSheet.create({
   brandTagline: { fontFamily: F.medium, color: C.muted, fontSize: 10, lineHeight: 16 },
   brandMark: { width: 42, height: 42, borderRadius: 15, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-4deg' }] },
   content: { paddingHorizontal: 18, paddingTop: 8 },
-  hero: { height: 226, borderRadius: 30, overflow: 'hidden', padding: 21, position: 'relative', shadowColor: C.purpleDark, shadowOpacity: 0.22, shadowRadius: 16, shadowOffset: { width: 0, height: 9 }, elevation: 7 },
+  // The mascot used to be absolutely positioned and overlapped the balance copy
+  // on narrower phones. Laying them out in a row lets the text keep whatever
+  // width is left instead of being covered.
+  hero: { height: 226, borderRadius: 30, overflow: 'hidden', padding: 21, flexDirection: 'row-reverse', alignItems: 'flex-end', shadowColor: C.purpleDark, shadowOpacity: 0.22, shadowRadius: 16, shadowOffset: { width: 0, height: 9 }, elevation: 7 },
   heroBlobOne: { position: 'absolute', width: 170, height: 170, borderRadius: 85, backgroundColor: 'rgba(255,255,255,0.09)', left: -55, top: -65 },
   heroBlobTwo: { position: 'absolute', width: 94, height: 94, borderRadius: 47, backgroundColor: 'rgba(255,200,87,0.18)', right: 96, bottom: -50 },
-  heroCopy: { alignSelf: 'flex-end', alignItems: 'flex-end', width: '65%', zIndex: 2 },
+  heroCopy: { flex: 1, alignItems: 'flex-end', zIndex: 2 },
   heroTag: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(31,20,89,0.28)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 13 },
   heroTagText: { fontFamily: F.semi, color: '#FFFFFF', fontSize: 11 },
   heroLabel: { fontFamily: F.medium, color: '#E8E3FF', fontSize: 13, marginTop: 13 },
   heroAmount: { fontFamily: F.black, color: '#FFFFFF', fontSize: 25, lineHeight: 40, textAlign: 'right' },
   heroHint: { fontFamily: F.medium, color: '#EAE6FF', fontSize: 11, lineHeight: 19, textAlign: 'right', marginTop: 4 },
-  heroMascot: { position: 'absolute', left: -24, bottom: -16, width: 178, height: 190 },
+  heroMascot: { width: 152, height: 184, marginLeft: -32, marginBottom: -21 },
   statsRow: { flexDirection: 'row-reverse', gap: 10, marginTop: 18 },
   statCard: { flex: 1, minHeight: 82, borderRadius: 22, padding: 12, flexDirection: 'row-reverse', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: 'rgba(37,32,58,0.05)' },
   statIcon: { width: 39, height: 39, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },

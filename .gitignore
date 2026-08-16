@@ -12,3 +12,4 @@ npm-debug.log*
 *.p12
 *.key
 *.mobileprovision
+._*

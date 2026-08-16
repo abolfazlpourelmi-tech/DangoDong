@@ -19,6 +19,8 @@ export type Expense = {
   participantIds?: string[];
   allocations?: ExpenseAllocation[];
   createdAt: string;
+  /** Raw ISO timestamp from the server; used for time-based filters. */
+  createdAtISO?: string;
   category?: ExpenseCategory;
   participantPersonCount?: number;
 };
@@ -44,6 +46,20 @@ export type SettlementPayment = Transfer & {
   id: string;
   createdAt: string;
 };
+
+const WEEK_IN_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Expenses only carry a human-readable `createdAt` label, so time filters have
+ * to read the raw server timestamp. Rows without one (optimistic local entries)
+ * are treated as brand new so they never disappear from the list.
+ */
+export function isFromLastWeek(expense: Expense, now: number = Date.now()): boolean {
+  if (!expense.createdAtISO) return true;
+  const createdAt = new Date(expense.createdAtISO).getTime();
+  if (Number.isNaN(createdAt)) return true;
+  return now - createdAt <= WEEK_IN_MS;
+}
 
 export function allocateByWeight(
   amount: number,

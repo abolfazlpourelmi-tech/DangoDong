@@ -93,6 +93,7 @@ export async function loadOnlineStories(): Promise<OnlineStory[]> {
         payerId: row.paid_by,
         category: row.category,
         createdAt: relativeTime(row.created_at),
+        createdAtISO: row.created_at ?? undefined,
         participantPersonCount: Math.max(1, Number(row.participant_person_count ?? 1)),
         allocations: (shareRows ?? []).filter((share) => share.expense_id === row.id).map((share) => ({
           memberId: share.member_id,
@@ -242,6 +243,9 @@ export function subscribeToStoryChanges(onChange: () => void) {
     .on('postgres_changes', { event: '*', schema: 'public', table: 'story_members' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'expenses' }, onChange)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'expense_shares' }, onChange)
+    // Settlements drive balances and notifications too; without this channel a
+    // payment recorded by one member never reaches the other devices.
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'settlements' }, onChange)
     .subscribe();
   return () => { void client.removeChannel(channel); };
 }
