@@ -1,0 +1,50 @@
+name: Test database migrations
+
+# Kept separate from the APK build: this only needs to run when the database
+# changes, and it should run on pull requests, where building an APK would be
+# wasted work.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/migrations.yml'
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - '.github/workflows/migrations.yml'
+
+jobs:
+  migrations:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # Match the major version Supabase runs.
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install the psql client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Apply migrations and check the access rules
+        env:
+          # The runner reaches the service container over TCP, so the script
+          # reuses that server instead of starting one of its own.
+          PGTEST_URL: postgres://postgres:postgres@localhost:5432/postgres
+        run: supabase/tests/run.sh
