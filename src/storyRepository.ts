@@ -217,6 +217,18 @@ export async function createOnlineExpense(storyId: string, expense: Expense) {
   return data as string;
 }
 
+/** Card numbers of the story's registered members, keyed by member id. */
+export async function loadStoryMemberCards(storyId: string): Promise<Record<string, string>> {
+  if (!supabase) return {};
+  const { data, error } = await supabase.rpc('story_member_cards', { target_story_id: storyId });
+  if (error) throw error;
+  const cards: Record<string, string> = {};
+  for (const row of (data ?? []) as Array<{ member_id: string; card_number: string }>) {
+    if (row.member_id && row.card_number) cards[row.member_id] = row.card_number;
+  }
+  return cards;
+}
+
 export async function updateOnlineExpense(expenseId: string, expense: Expense) {
   if (!supabase) throw new Error('Supabase is not configured');
   const { error } = await supabase.rpc('update_story_expense', {

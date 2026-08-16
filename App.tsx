@@ -57,6 +57,7 @@ import {
   deleteOnlineStory,
   updateOnlineExpense,
   deleteOnlineExpense,
+  loadStoryMemberCards,
 } from './src/storyRepository';
 
 // SDK 54 pins react-native-svg 15.12, whose recursive icon prop types can
@@ -226,6 +227,11 @@ function formatMoney(amount: number) {
   return `${faNumber.format(Math.round(amount))} تومان`;
 }
 
+/** Card numbers are read aloud in groups of four, so display them that way. */
+function formatCardNumber(card: string) {
+  return card.replace(/(\d{4})(?=\d)/g, '$1 ').trim();
+}
+
 function initials(name: string) {
   return name.trim().slice(0, 1) || '؟';
 }
@@ -357,6 +363,7 @@ function DongoApp() {
   const [accountLoading, setAccountLoading] = useState(true);
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountError, setAccountError] = useState('');
+  const [memberCards, setMemberCards] = useState<Record<string, string>>({});
   const lastBackPressAt = useRef(0);
 
   const balances = useMemo(() => applySettlementPayments(calculateBalances(members, expenses), payments), [members, expenses, payments]);
@@ -527,6 +534,7 @@ function DongoApp() {
     // Member names in every story come from the profile row, so refresh them
     // instead of leaving the old name on screen until the next unrelated sync.
     void syncFromCloud();
+    void refreshMemberCards();
   }
 
   async function signOut() {
@@ -555,6 +563,28 @@ function DongoApp() {
   }, []);
 
   useEffect(() => { void loadAccount(); }, []);
+
+  async function refreshMemberCards(targetStoryId = storyId) {
+    if (isLocalWebPreview) {
+      setMemberCards(Object.fromEntries(members.map((member) => [member.id, '6219861012345678'])));
+      return;
+    }
+    if (!targetStoryId) return;
+    try {
+      setMemberCards(await loadStoryMemberCards(targetStoryId));
+    } catch {
+      // Card numbers are a convenience; settling still works without them.
+      setMemberCards({});
+    }
+  }
+
+  // Only fetched when the settlement screen is actually in view, so other
+  // members' card numbers are not pulled down during ordinary browsing.
+  useEffect(() => {
+    if (tab !== 'settlement' || storiesHome) return;
+    setAccountError('');
+    void refreshMemberCards();
+  }, [tab, storiesHome, storyId, payments.length]);
 
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
@@ -1123,6 +1153,12 @@ function DongoApp() {
     }
   }
 
+  async function copyCardNumber(card: string, ownerName: string) {
+    await Clipboard.setStringAsync(card);
+    showToast(`شماره کارت ${ownerName} کپی شد`);
+    void Haptics.selectionAsync();
+  }
+
   async function copyInviteCode() {
     if (!activeStory?.inviteCode) return;
     await Clipboard.setStringAsync(activeStory.inviteCode);
@@ -1361,8 +1397,50 @@ function DongoApp() {
   }
 
   function renderSettlement() {
+    // Nobody can transfer money to someone whose card they cannot see, so ask
+    // for it right where the need shows up rather than hiding it in settings.
+    const needsOwnCard = !accountLoading && !accountCardNumber.trim() && Boolean(currentUserId);
     return (
       <>
+        {needsOwnCard && (
+          <View style={styles.cardPrompt}>
+            <View style={styles.cardPromptHead}>
+              <View style={styles.cardPromptIcon}><WalletCards size={22} color={C.purple} /></View>
+              <View style={styles.cardPromptCopy}>
+                <AppText style={styles.cardPromptTitle}>شماره کارتت را ثبت کن</AppText>
+                <AppText style={styles.cardPromptText}>تا وقتی ثبت نکنی، بقیه نمی‌دانند دنگت را به کدام کارت بریزند.</AppText>
+              </View>
+            </View>
+            <TextInput
+              accessibilityLabel="شماره کارت برای دریافت دنگ"
+              value={accountCardNumber}
+              onChangeText={(value) => { setAccountCardNumber(normalizeDigits(value).slice(0, 16)); setAccountError(''); }}
+              placeholder="۱۶ رقم بدون فاصله"
+              placeholderTextColor={C.faint}
+              keyboardType="number-pad"
+              style={styles.cardPromptInput}
+              textAlign="center"
+            />
+            {accountError ? <AppText style={styles.accountError}>{accountError}</AppText> : null}
+            <Pressable
+              accessibilityRole="button"
+              disabled={accountSaving}
+              onPress={() => {
+                if (!accountName.trim()) {
+                  setTab('account');
+                  showToast('اول نامت را در حساب کاربری کامل کن.');
+                  return;
+                }
+                void saveAccount();
+              }}
+              style={({ pressed }) => [styles.cardPromptButton, pressed && styles.pressed, accountSaving && styles.saveButtonDisabled]}
+            >
+              <Check size={18} color="#FFFFFF" />
+              <AppText style={styles.cardPromptButtonText}>{accountSaving ? 'در حال ذخیره…' : 'ثبت شماره کارت'}</AppText>
+            </Pressable>
+            <AppText style={styles.cardPromptHint}>فقط شماره کارت ذخیره می‌شود؛ رمز، CVV2 و تاریخ انقضا هرگز پرسیده نمی‌شوند.</AppText>
+          </View>
+        )}
         <View style={styles.settlementHero}>
           <View style={styles.settlementConfettiOne} />
           <View style={styles.settlementConfettiTwo} />
@@ -1406,6 +1484,7 @@ function DongoApp() {
           ) : transfers.map((transfer, index) => {
             const from = memberById(transfer.fromId);
             const to = memberById(transfer.toId);
+            const toCard = memberCards[transfer.toId];
             return (
               <View style={styles.transferCard} key={`${transfer.fromId}-${transfer.toId}-${index}`}>
                 <View style={styles.stepBadge}><AppText style={styles.stepNumber}>{faNumber.format(index + 1)}</AppText></View>
@@ -1415,6 +1494,28 @@ function DongoApp() {
                   <View style={styles.transferPerson}><Avatar member={to} size={44} /><AppText style={styles.transferName}>{to?.name}</AppText><AppText style={styles.transferRole}>دریافت‌کننده</AppText></View>
                 </View>
                 <View style={styles.transferDivider} />
+                {toCard ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={`کپی شماره کارت ${to?.name}`}
+                    onPress={() => void copyCardNumber(toCard, to?.name ?? '')}
+                    style={({ pressed }) => [styles.transferCardRow, pressed && styles.pressed]}
+                  >
+                    <View style={styles.transferCardCopyIcon}><Copy size={15} color={C.purple} /></View>
+                    <View style={styles.transferCardCopy}>
+                      <AppText style={styles.transferCardLabel}>کارت {to?.name}</AppText>
+                      <AppText selectable style={styles.transferCardNumber}>{formatCardNumber(toCard)}</AppText>
+                    </View>
+                  </Pressable>
+                ) : (
+                  <View style={styles.transferCardMissing}>
+                    <AppText style={styles.transferCardMissingText}>{to?.isMe
+                      ? 'تو هنوز شماره کارتت را ثبت نکرده‌ای؛ از بالای همین صفحه ثبتش کن تا بقیه بتوانند دنگت را بریزند.'
+                      : to?.kind === 'guest'
+                        ? `${to?.name} در اپ نیست؛ شماره کارتش را باید خودت بپرسی.`
+                        : `${to?.name} هنوز شماره کارتی ثبت نکرده.`}</AppText>
+                  </View>
+                )}
                 <View style={styles.transferFooter}>
                   <Pressable accessibilityRole="button" accessibilityLabel={`ثبت پرداخت ${formatMoney(transfer.amount)} از ${from?.name} به ${to?.name}`} accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.paidButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => setPendingTransfer(transfer)}>
                     <Check size={16} color={C.purple} /><AppText style={styles.paidButtonText}>پرداخت کردم</AppText>
@@ -2400,6 +2501,23 @@ const styles = StyleSheet.create({
   expenseAllocationName: { fontFamily: F.bold, fontSize: 10 },
   expenseAllocationLabel: { fontFamily: F.medium, color: C.muted, fontSize: 8, marginTop: 2 },
   expenseAllocationAmount: { fontFamily: F.extra, fontSize: 10 },
+  cardPrompt: { backgroundColor: C.paper, borderRadius: 24, borderWidth: 1, borderColor: '#E0D6F5', padding: 17, marginBottom: 16 },
+  cardPromptHead: { flexDirection: 'row-reverse', alignItems: 'flex-start', gap: 11 },
+  cardPromptIcon: { width: 42, height: 42, borderRadius: 15, backgroundColor: C.purplePale, alignItems: 'center', justifyContent: 'center' },
+  cardPromptCopy: { flex: 1, alignItems: 'flex-end' },
+  cardPromptTitle: { fontFamily: F.extra, fontSize: 14, textAlign: 'right' },
+  cardPromptText: { fontFamily: F.medium, fontSize: 11, color: C.muted, lineHeight: 19, textAlign: 'right', marginTop: 3 },
+  cardPromptInput: { minHeight: 52, borderRadius: 16, borderWidth: 1, borderColor: C.line, backgroundColor: C.canvas, fontFamily: F.bold, fontSize: 17, letterSpacing: 2, color: C.ink, writingDirection: 'ltr', marginTop: 13 },
+  cardPromptButton: { minHeight: 50, borderRadius: 16, backgroundColor: C.purple, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 10 },
+  cardPromptButtonText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 13 },
+  cardPromptHint: { fontFamily: F.medium, fontSize: 9, color: C.faint, textAlign: 'right', lineHeight: 16, marginTop: 9 },
+  transferCardRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 10, backgroundColor: C.purplePale, borderRadius: 16, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 11 },
+  transferCardCopyIcon: { width: 32, height: 32, borderRadius: 12, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center' },
+  transferCardCopy: { flex: 1, alignItems: 'flex-end' },
+  transferCardLabel: { fontFamily: F.semi, fontSize: 9, color: C.muted },
+  transferCardNumber: { fontFamily: F.bold, fontSize: 15, color: C.purpleDark, writingDirection: 'ltr', letterSpacing: 1, marginTop: 2 },
+  transferCardMissing: { backgroundColor: C.canvas, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 9, marginBottom: 11 },
+  transferCardMissingText: { fontFamily: F.medium, fontSize: 10, color: C.faint, textAlign: 'right', lineHeight: 17 },
   expenseAuthorRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 8, marginTop: 14, paddingTop: 13, borderTopWidth: 1, borderTopColor: C.line },
   expenseAuthorIcon: { width: 28, height: 28, borderRadius: 10, backgroundColor: C.purplePale, alignItems: 'center', justifyContent: 'center' },
   expenseAuthorText: { flex: 1, fontFamily: F.semi, fontSize: 11, color: C.muted, textAlign: 'right' },
