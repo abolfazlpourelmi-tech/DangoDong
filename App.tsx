@@ -359,6 +359,10 @@ function DongoApp() {
   const [pendingTransfer, setPendingTransfer] = useState<Transfer | null>(null);
   const [accountName, setAccountName] = useState('');
   const [accountCardNumber, setAccountCardNumber] = useState('');
+  // What the server has, as opposed to what is currently in the input. The
+  // settlement prompt keys off this: keying it off the input made the whole
+  // prompt vanish on the first keystroke, before it could be saved.
+  const [savedCardNumber, setSavedCardNumber] = useState('');
   const [accountPhone, setAccountPhone] = useState('');
   const [accountLoading, setAccountLoading] = useState(true);
   const [accountSaving, setAccountSaving] = useState(false);
@@ -491,6 +495,7 @@ function DongoApp() {
       const storedPhone = profile?.phone ?? user.phone ?? '';
       setAccountPhone(storedPhone.startsWith('anonymous:') ? '' : storedPhone);
       setAccountCardNumber(paymentMethod?.card_number ?? '');
+      setSavedCardNumber(paymentMethod?.card_number ?? '');
     }
     setAccountLoading(false);
   }
@@ -530,7 +535,8 @@ function DongoApp() {
       setAccountError('ذخیره شماره کارت انجام نشد.');
       return;
     }
-    showToast('اطلاعات حساب ذخیره شد');
+    setSavedCardNumber(card);
+    showToast(card ? 'شماره کارتت ذخیره شد' : 'اطلاعات حساب ذخیره شد');
     // Member names in every story come from the profile row, so refresh them
     // instead of leaving the old name on screen until the next unrelated sync.
     void syncFromCloud();
@@ -1399,7 +1405,11 @@ function DongoApp() {
   function renderSettlement() {
     // Nobody can transfer money to someone whose card they cannot see, so ask
     // for it right where the need shows up rather than hiding it in settings.
-    const needsOwnCard = !accountLoading && !accountCardNumber.trim() && Boolean(currentUserId);
+    const needsOwnCard = !accountLoading && !savedCardNumber.trim() && Boolean(currentUserId);
+    const typedCardDigits = normalizeDigits(accountCardNumber).length;
+    // Saving a partial number just bounces off the 16-digit rule, so keep the
+    // button off until it can actually succeed.
+    const cardPromptReady = typedCardDigits === 16 && !accountSaving;
     return (
       <>
         {needsOwnCard && (
@@ -1424,7 +1434,8 @@ function DongoApp() {
             {accountError ? <AppText style={styles.accountError}>{accountError}</AppText> : null}
             <Pressable
               accessibilityRole="button"
-              disabled={accountSaving}
+              accessibilityState={{ disabled: !cardPromptReady }}
+              disabled={!cardPromptReady}
               onPress={() => {
                 if (!accountName.trim()) {
                   setTab('account');
@@ -1433,12 +1444,14 @@ function DongoApp() {
                 }
                 void saveAccount();
               }}
-              style={({ pressed }) => [styles.cardPromptButton, pressed && styles.pressed, accountSaving && styles.saveButtonDisabled]}
+              style={({ pressed }) => [styles.cardPromptButton, pressed && styles.pressed, !cardPromptReady && styles.saveButtonDisabled]}
             >
               <Check size={18} color="#FFFFFF" />
               <AppText style={styles.cardPromptButtonText}>{accountSaving ? 'در حال ذخیره…' : 'ثبت شماره کارت'}</AppText>
             </Pressable>
-            <AppText style={styles.cardPromptHint}>فقط شماره کارت ذخیره می‌شود؛ رمز، CVV2 و تاریخ انقضا هرگز پرسیده نمی‌شوند.</AppText>
+            <AppText style={styles.cardPromptHint}>{typedCardDigits > 0 && typedCardDigits < 16
+              ? `${faNumber.format(typedCardDigits)} از ۱۶ رقم وارد شده.`
+              : 'فقط شماره کارت ذخیره می‌شود؛ رمز، CVV2 و تاریخ انقضا هرگز پرسیده نمی‌شوند.'}</AppText>
           </View>
         )}
         <View style={styles.settlementHero}>
