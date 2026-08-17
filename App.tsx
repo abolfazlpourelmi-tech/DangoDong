@@ -42,6 +42,7 @@ import {
   type Transfer,
 } from './src/settlement';
 import { AuthGate } from './src/AuthGate';
+import { displayablePhone, toIranPhone, toLatinDigits } from './src/phone';
 import { supabase } from './src/supabase';
 import { preloadAccountBanner, preloadExpenseInterstitial, showExpenseInterstitial } from './src/tapsellAds';
 import {
@@ -364,6 +365,16 @@ function DongoApp() {
   // prompt vanish on the first keystroke, before it could be saved.
   const [savedCardNumber, setSavedCardNumber] = useState('');
   const [accountPhone, setAccountPhone] = useState('');
+  // Linking a phone to an account that started anonymously, so the data can be
+  // recovered on another device. Optional — the app works fine without it.
+  const [phoneStage, setPhoneStage] = useState<'idle' | 'code'>('idle');
+  const [phoneInput, setPhoneInput] = useState('');
+  const [phoneOtp, setPhoneOtp] = useState('');
+  const [phonePending, setPhonePending] = useState('');
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneError, setPhoneError] = useState('');
+  const [phoneOtpExpiresAt, setPhoneOtpExpiresAt] = useState<number | null>(null);
+  const [phoneSecondsLeft, setPhoneSecondsLeft] = useState(0);
   const [accountLoading, setAccountLoading] = useState(true);
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountError, setAccountError] = useState('');
@@ -492,8 +503,7 @@ function DongoApp() {
       setAccountError('دریافت اطلاعات حساب ناموفق بود.');
     } else {
       setAccountName(profile?.full_name ?? '');
-      const storedPhone = profile?.phone ?? user.phone ?? '';
-      setAccountPhone(storedPhone.startsWith('anonymous:') ? '' : storedPhone);
+      setAccountPhone(displayablePhone(profile?.phone ?? user.phone ?? ''));
       setAccountCardNumber(paymentMethod?.card_number ?? '');
       setSavedCardNumber(paymentMethod?.card_number ?? '');
     }
@@ -541,6 +551,99 @@ function DongoApp() {
     // instead of leaving the old name on screen until the next unrelated sync.
     void syncFromCloud();
     void refreshMemberCards();
+  }
+
+  function phoneFailure(message: string) {
+    const lower = message.toLowerCase();
+    if (lower.includes('already') && (lower.includes('registered') || lower.includes('exists') || lower.includes('taken'))) {
+      return 'این شماره قبلاً به حساب دیگری وصل شده. برای بازیابی آن حساب، از اپ خارج شو و با همین شماره وارد شو.';
+    }
+    if (lower.includes('unsupported phone provider') || lower.includes('sms')) {
+      return 'ارسال پیامک روی سرور فعال نیست؛ فعلاً نمی‌شود شماره ثبت کرد.';
+    }
+    if (lower.includes('token') || lower.includes('otp') || lower.includes('expired')) {
+      return 'کد واردشده درست نیست یا منقضی شده.';
+    }
+    if (lower.includes('rate')) return 'تعداد درخواست‌ها زیاد شد؛ کمی بعد دوباره تلاش کن.';
+    if (lower.includes('duplicate') || lower.includes('unique')) {
+      return 'این شماره قبلاً برای حساب دیگری ثبت شده است.';
+    }
+    return message;
+  }
+
+  async function startPhoneLink() {
+    if (!supabase || phoneBusy) return;
+    const formatted = toIranPhone(phoneInput);
+    if (!formatted) {
+      setPhoneError('شماره موبایل را به شکل ۰۹۱۲۱۲۳۴۵۶۷ وارد کن.');
+      return;
+    }
+    setPhoneBusy(true);
+    setPhoneError('');
+    const { error } = await supabase.auth.updateUser({ phone: formatted });
+    setPhoneBusy(false);
+    if (error) {
+      setPhoneError(phoneFailure(error.message));
+      return;
+    }
+    setPhonePending(formatted);
+    setPhoneOtp('');
+    setPhoneOtpExpiresAt(Date.now() + 60_000);
+    setPhoneSecondsLeft(60);
+    setPhoneStage('code');
+  }
+
+  async function confirmPhoneLink() {
+    if (!supabase || phoneBusy) return;
+    const token = toLatinDigits(phoneOtp);
+    if (token.length !== 6) {
+      setPhoneError('کد شش‌رقمی را کامل وارد کن.');
+      return;
+    }
+    setPhoneBusy(true);
+    setPhoneError('');
+    // 'phone_change' is the flow for attaching a number to an existing account,
+    // including one that started out anonymous.
+    const { error } = await supabase.auth.verifyOtp({ phone: phonePending, token, type: 'phone_change' });
+    if (error) {
+      setPhoneBusy(false);
+      setPhoneError(phoneFailure(error.message));
+      return;
+    }
+    // The profile row still carries the synthetic anonymous phone, so move it
+    // over too — that is what other members' devices read.
+    const { data: userData } = await supabase.auth.getUser();
+    if (userData.user) {
+      const { error: profileError } = await supabase.from('profiles').upsert({
+        id: userData.user.id,
+        full_name: accountName.trim() || 'من',
+        phone: phonePending,
+        updated_at: new Date().toISOString(),
+      });
+      if (profileError) {
+        setPhoneBusy(false);
+        setPhoneError(phoneFailure(profileError.message));
+        return;
+      }
+    }
+    setPhoneBusy(false);
+    setAccountPhone(phonePending);
+    setPhoneStage('idle');
+    setPhoneInput('');
+    setPhoneOtp('');
+    setPhonePending('');
+    setPhoneOtpExpiresAt(null);
+    showToast('شماره موبایلت ثبت شد؛ حالا اطلاعاتت قابل بازیابی است');
+    void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }
+
+  function cancelPhoneLink() {
+    setPhoneStage('idle');
+    setPhoneOtp('');
+    setPhonePending('');
+    setPhoneError('');
+    setPhoneOtpExpiresAt(null);
+    setPhoneSecondsLeft(0);
   }
 
   async function signOut() {
@@ -595,6 +698,14 @@ function DongoApp() {
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (!phoneOtpExpiresAt) return;
+    const tick = () => setPhoneSecondsLeft(Math.max(0, Math.ceil((phoneOtpExpiresAt - Date.now()) / 1000)));
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [phoneOtpExpiresAt]);
 
   useEffect(() => {
     if (Platform.OS === 'android') {
@@ -1258,7 +1369,72 @@ function DongoApp() {
           <AppText style={styles.accountLabel}>نام و نام خانوادگی <AppText style={styles.requiredMark}>*</AppText></AppText>
           <TextInput accessibilityLabel="نام و نام خانوادگی حساب کاربری" value={accountName} onChangeText={setAccountName} placeholder="مثلاً امیر رضایی" placeholderTextColor={C.faint} style={styles.accountInput} textAlign="right" />
           <AppText style={styles.accountLabel}>شماره موبایل</AppText>
-          <View style={styles.readonlyField}><AppText style={styles.readonlyValue}>{accountPhone || '—'}</AppText><AppText style={styles.readonlyHint}>برای امنیت، تغییر شماره از همین بخش انجام نمی‌شود.</AppText></View>
+          {accountPhone ? (
+            <View style={styles.readonlyField}>
+              <AppText style={styles.readonlyValue}>{accountPhone}</AppText>
+              <AppText style={styles.readonlyHint}>اطلاعاتت به این شماره گره خورده؛ روی گوشی جدید با همین شماره وارد شو تا همه‌چیز برگردد.</AppText>
+            </View>
+          ) : phoneStage === 'idle' ? (
+            <View style={styles.phoneLinkBox}>
+              <AppText style={styles.phoneLinkTitle}>هنوز شماره‌ای ثبت نکرده‌ای</AppText>
+              <AppText style={styles.phoneLinkText}>ثبت شماره اختیاری است، اما بدون آن اگر گوشی‌ات را عوض کنی یا اپ را پاک کنی، ماجراها و حساب‌هایت برنمی‌گردند.</AppText>
+              <TextInput
+                accessibilityLabel="شماره موبایل برای ثبت"
+                value={phoneInput}
+                onChangeText={(value) => { setPhoneInput(toLatinDigits(value).slice(0, 11)); setPhoneError(''); }}
+                placeholder="۰۹۱۲۱۲۳۴۵۶۷"
+                placeholderTextColor={C.faint}
+                keyboardType="phone-pad"
+                maxLength={11}
+                style={styles.phoneLinkInput}
+                textAlign="center"
+              />
+              {phoneError ? <AppText style={styles.accountError}>{phoneError}</AppText> : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: phoneBusy || !toIranPhone(phoneInput) }}
+                disabled={phoneBusy || !toIranPhone(phoneInput)}
+                onPress={() => void startPhoneLink()}
+                style={({ pressed }) => [styles.phoneLinkButton, pressed && styles.pressed, (phoneBusy || !toIranPhone(phoneInput)) && styles.saveButtonDisabled]}
+              >
+                <AppText style={styles.phoneLinkButtonText}>{phoneBusy ? 'در حال ارسال…' : 'ارسال کد تأیید'}</AppText>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={styles.phoneLinkBox}>
+              <AppText style={styles.phoneLinkTitle}>کد پیامک‌شده را وارد کن</AppText>
+              <AppText style={styles.phoneLinkText}>کد شش‌رقمی به {phonePending} فرستاده شد.</AppText>
+              <TextInput
+                accessibilityLabel="کد تأیید شماره موبایل"
+                value={phoneOtp}
+                onChangeText={(value) => { setPhoneOtp(toLatinDigits(value).slice(0, 6)); setPhoneError(''); }}
+                placeholder="ــــــ"
+                placeholderTextColor={C.faint}
+                keyboardType="number-pad"
+                maxLength={6}
+                style={[styles.phoneLinkInput, styles.phoneOtpInput]}
+                textAlign="center"
+                autoFocus
+              />
+              <AppText style={styles.phoneLinkTimer}>{phoneSecondsLeft > 0
+                ? `اعتبار کد: ${faNumber.format(phoneSecondsLeft)} ثانیه`
+                : 'اعتبار کد تمام شد؛ دوباره کد بگیر.'}</AppText>
+              {phoneError ? <AppText style={styles.accountError}>{phoneError}</AppText> : null}
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ disabled: phoneBusy || toLatinDigits(phoneOtp).length !== 6 }}
+                disabled={phoneBusy || toLatinDigits(phoneOtp).length !== 6}
+                onPress={() => void confirmPhoneLink()}
+                style={({ pressed }) => [styles.phoneLinkButton, pressed && styles.pressed, (phoneBusy || toLatinDigits(phoneOtp).length !== 6) && styles.saveButtonDisabled]}
+              >
+                <AppText style={styles.phoneLinkButtonText}>{phoneBusy ? 'در حال بررسی…' : 'تأیید و ثبت شماره'}</AppText>
+              </Pressable>
+              <View style={styles.phoneLinkActions}>
+                <Pressable accessibilityRole="button" onPress={cancelPhoneLink}><AppText style={styles.phoneLinkSecondary}>انصراف</AppText></Pressable>
+                {phoneSecondsLeft === 0 && <Pressable accessibilityRole="button" disabled={phoneBusy} onPress={() => void startPhoneLink()}><AppText style={styles.phoneLinkSecondary}>ارسال دوباره کد</AppText></Pressable>}
+              </View>
+            </View>
+          )}
           <AppText style={styles.accountLabel}>شماره کارت برای دریافت دنگ <AppText style={styles.optionalMark}>اختیاری</AppText></AppText>
           <TextInput accessibilityLabel="شماره کارت دریافت دنگ" value={accountCardNumber} onChangeText={(value) => setAccountCardNumber(normalizeDigits(value).slice(0, 16))} placeholder="۱۶ رقم بدون فاصله" placeholderTextColor={C.faint} keyboardType="number-pad" style={[styles.accountInput, styles.accountCardInput]} textAlign="center" />
           <AppText style={styles.accountHint}>رمز، CVV2 و تاریخ انقضا دریافت یا ذخیره نمی‌شوند.</AppText>
@@ -2417,6 +2593,16 @@ const styles = StyleSheet.create({
   accountInput: { minHeight: 54, borderRadius: 16, backgroundColor: C.canvas, borderWidth: 1, borderColor: C.line, color: C.ink, fontFamily: F.semi, fontSize: 12, paddingHorizontal: 14, marginBottom: 15, writingDirection: 'rtl' },
   accountCardInput: { letterSpacing: 1.5, writingDirection: 'ltr' },
   readonlyField: { minHeight: 58, borderRadius: 16, backgroundColor: '#F8F6F3', paddingHorizontal: 14, paddingVertical: 9, alignItems: 'flex-end', marginBottom: 15 },
+  phoneLinkBox: { borderRadius: 18, borderWidth: 1, borderColor: '#E0D6F5', backgroundColor: C.purplePale, padding: 14, marginBottom: 15 },
+  phoneLinkTitle: { fontFamily: F.extra, fontSize: 12, textAlign: 'right' },
+  phoneLinkText: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 18, textAlign: 'right', marginTop: 3 },
+  phoneLinkInput: { minHeight: 50, borderRadius: 14, borderWidth: 1, borderColor: C.line, backgroundColor: C.paper, fontFamily: F.bold, fontSize: 16, color: C.ink, writingDirection: 'ltr', marginTop: 11 },
+  phoneOtpInput: { fontSize: 21, letterSpacing: 8 },
+  phoneLinkTimer: { fontFamily: F.semi, fontSize: 10, color: C.muted, textAlign: 'center', marginTop: 8 },
+  phoneLinkButton: { minHeight: 46, borderRadius: 14, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  phoneLinkButtonText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 12 },
+  phoneLinkActions: { flexDirection: 'row-reverse', justifyContent: 'space-between', marginTop: 11 },
+  phoneLinkSecondary: { fontFamily: F.bold, fontSize: 11, color: C.purple },
   readonlyValue: { fontFamily: F.bold, fontSize: 12, color: C.ink, writingDirection: 'ltr' },
   readonlyHint: { fontFamily: F.medium, color: C.faint, fontSize: 8, marginTop: 4, textAlign: 'right' },
   accountHint: { fontFamily: F.medium, color: C.muted, fontSize: 8, textAlign: 'right', lineHeight: 16, marginTop: -7, marginBottom: 14 },

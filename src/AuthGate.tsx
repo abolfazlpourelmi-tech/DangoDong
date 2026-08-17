@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { toIranPhone, toLatinDigits } from './phone';
 import { isSupabaseConfigured, supabase } from './supabase';
 
 type Stage = 'welcome' | 'phone' | 'otp' | 'profile' | 'ready';
@@ -20,22 +21,6 @@ const OTP_EXPIRY_SECONDS = 60;
 const isLocalWebPreview = Platform.OS === 'web'
   && typeof window !== 'undefined'
   && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-
-function digits(value: string) {
-  const persian = '۰۱۲۳۴۵۶۷۸۹';
-  const arabic = '٠١٢٣٤٥٦٧٨٩';
-  return value
-    .replace(/[۰-۹]/g, (digit) => String(persian.indexOf(digit)))
-    .replace(/[٠-٩]/g, (digit) => String(arabic.indexOf(digit)))
-    .replace(/\D/g, '');
-}
-
-function iranPhone(value: string) {
-  const normalized = digits(value);
-  if (/^09\d{9}$/.test(normalized)) return `+98${normalized.slice(1)}`;
-  if (/^989\d{9}$/.test(normalized)) return `+${normalized}`;
-  return '';
-}
 
 function friendlyError(message: string) {
   const lower = message.toLowerCase();
@@ -132,7 +117,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
 
   async function requestOtp() {
     if (!supabase) return;
-    const formatted = iranPhone(phone);
+    const formatted = toIranPhone(phone);
     if (!formatted) {
       setError('شماره موبایل را به شکل ۰۹۱۲۱۲۳۴۵۶۷ وارد کنید.');
       return;
@@ -170,7 +155,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setError('اعتبار کد تمام شده؛ دوباره کد بگیر.');
       return;
     }
-    const token = digits(otp);
+    const token = toLatinDigits(otp);
     if (token.length !== 6) {
       setError('کد شش‌رقمی را کامل وارد کنید.');
       return;
@@ -251,7 +236,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
             <Pressable accessibilityRole="button" disabled={submitting} onPress={() => { setError(''); setStage('phone'); }} style={styles.secondaryButton}>
               <Text style={styles.secondaryButtonText}>ورود یا بازیابی با شماره</Text>
             </Pressable>
-            <Text style={styles.anonymousNotice}>در حالت بدون شماره، با حذف اپ یا خروج از حساب، بازیابی اطلاعات ممکن نیست.</Text>
+            <Text style={styles.anonymousNotice}>بدون شماره هم همه‌چیز کار می‌کند، اما تا وقتی شماره‌ات را ثبت نکرده‌ای با حذف اپ یا خروج از حساب اطلاعاتت برنمی‌گردد. هر وقت خواستی از «حساب من» شماره‌ات را اضافه کن.</Text>
           </View>
         )}
         {stage === 'phone' && (
@@ -261,7 +246,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               autoFocus
               keyboardType="phone-pad"
               maxLength={11}
-              onChangeText={(value) => setPhone(digits(value).slice(0, 11))}
+              onChangeText={(value) => setPhone(toLatinDigits(value).slice(0, 11))}
               placeholder="۰۹۱۲۱۲۳۴۵۶۷"
               placeholderTextColor="#A19BA9"
               style={styles.input}
@@ -278,7 +263,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               autoFocus
               keyboardType="number-pad"
               maxLength={6}
-              onChangeText={(value) => setOtp(digits(value).slice(0, 6))}
+              onChangeText={(value) => setOtp(toLatinDigits(value).slice(0, 6))}
               placeholder="ــــــ"
               placeholderTextColor="#A19BA9"
               style={[styles.input, styles.otpInput]}
