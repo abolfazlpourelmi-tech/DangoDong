@@ -1642,7 +1642,7 @@ function DongoApp() {
               <AppText style={styles.heroTagText}>وضعیت حساب تو</AppText>
             </View>
             <AppText style={styles.heroLabel}>{positive ? 'در این ماجرا طلب داری' : 'در این ماجرا بدهکاری'}</AppText>
-            <AppText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.7} style={styles.heroAmount}>{formatMoney(Math.abs(currentBalance))}</AppText>
+            <AppText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.55} style={styles.heroAmount}>{formatMoney(Math.abs(currentBalance))}</AppText>
             <AppText style={styles.heroHint}>{positive ? 'طلب‌هات برای این ماجرا اینجا جمع می‌شن ✨' : 'نگران نباش؛ آخر ماجرا یک‌جا تسویه کن'}</AppText>
           </View>
           <Image source={require('./assets/dong-mascot-optimized.png')} style={styles.heroMascot} resizeMode="contain" />
