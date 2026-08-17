@@ -44,7 +44,13 @@ import {
 import { AuthGate } from './src/AuthGate';
 import { displayablePhone, toIranPhone, toLatinDigits } from './src/phone';
 import { supabase } from './src/supabase';
-import { preloadAccountBanner, preloadExpenseInterstitial, showExpenseInterstitial } from './src/tapsellAds';
+import {
+  hideAccountBanner,
+  preloadExpenseInterstitial,
+  setBannerVisibilityListener,
+  showAccountBanner,
+  showExpenseInterstitial,
+} from './src/tapsellAds';
 import {
   addOnlineGuest,
   completeOnlineStory,
@@ -287,11 +293,16 @@ function CategoryBadge({ category, size = 48 }: { category?: ExpenseCategory; si
 function DongoApp() {
   const insets = useSafeAreaInsets();
   const { keyboardVisible, keyboardInset, windowHeight } = useKeyboardInset();
+  // A Tapsell banner is a native view laid over the bottom of the screen, so the
+  // app has to lift its own chrome above it while one is actually on screen.
+  const [bannerVisible, setBannerVisible] = useState(false);
+
   // Edge-to-edge means the system navigation bar sits on top of the app, so the
   // bottom inset has to be reserved by hand or content hides underneath it.
   // When the keyboard is up it already covers that area, so take the larger of
   // the two rather than stacking them.
-  const bottomInset = Math.max(keyboardInset, insets.bottom);
+  const bannerInset = bannerVisible && !keyboardVisible ? 50 : 0;
+  const bottomInset = Math.max(keyboardInset, insets.bottom + bannerInset);
   // Sheets are anchored to the bottom, so they have to give the keyboard its
   // space explicitly; a fixed height keeps the internal ScrollView scrollable
   // instead of letting percentage heights re-resolve on every keyboard frame.
@@ -708,11 +719,22 @@ function DongoApp() {
   }, [phoneOtpExpiresAt]);
 
   useEffect(() => {
-    if (Platform.OS === 'android') {
-      void preloadExpenseInterstitial();
-      void preloadAccountBanner();
-    }
+    if (Platform.OS !== 'android') return;
+    void preloadExpenseInterstitial();
+    setBannerVisibilityListener(setBannerVisible);
+    return () => {
+      setBannerVisibilityListener(null);
+      hideAccountBanner();
+    };
   }, []);
+
+  // The banner belongs to the account screen; requesting it at launch left it
+  // covering the app from the first second and it was never taken down again.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    if (tab === 'account' && !storiesHome) void showAccountBanner();
+    else hideAccountBanner();
+  }, [tab, storiesHome]);
 
   function goBackInApp() {
     if (ownerFamilyModal) { setOwnerFamilyModal(false); setStoryModal(true); return true; }
@@ -1844,7 +1866,7 @@ function DongoApp() {
           </>
         )}
         {/* Extra room so account fields stay scrollable above the keyboard. */}
-        <View style={{ height: (keyboardVisible ? keyboardInset : insets.bottom) + 118 }} />
+        <View style={{ height: (keyboardVisible ? keyboardInset : insets.bottom + bannerInset) + 118 }} />
       </ScrollView>
 
       {toast ? (
@@ -1856,7 +1878,7 @@ function DongoApp() {
 
       {/* The nav floats above the content, so with the keyboard up it would
           otherwise hover over the keyboard and cover the field being typed in. */}
-      {!keyboardVisible && <View style={[styles.bottomNav, { bottom: insets.bottom + 10 }]}>
+      {!keyboardVisible && <View style={[styles.bottomNav, { bottom: insets.bottom + bannerInset + 10 }]}>
         <Pressable accessibilityRole="tab" accessibilityState={{ selected: storiesHome }} onPress={() => { setStoriesHome(true); setTab('home'); }} style={styles.navItem}>
           <View style={[styles.navIconWrap, storiesHome && styles.navIconWrapActive]}><Home size={21} color={storiesHome ? C.purple : C.faint} fill={storiesHome ? C.purplePale : 'transparent'} /></View>
           <AppText style={[styles.navLabel, storiesHome && styles.navLabelActive]}>ماجراها</AppText>
