@@ -1,6 +1,6 @@
 {
   "name": "dong-mobile",
-  "version": "1.7.2",
+  "version": "1.7.3",
   "private": true,
   "main": "index.js",
   "scripts": {
@@ -15,6 +15,7 @@
     "@expo-google-fonts/estedad": "^0.4.0",
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-native-tapsell-mediation/legacy": "1.3.0",
     "@react-native-tapsell-mediation/tapsell": "1.3.0",
     "@supabase/supabase-js": "^2.112.3",
     "expo": "~54.0.0",
