@@ -334,6 +334,11 @@ function DongoApp() {
   const [newStoryName, setNewStoryName] = useState('');
   const [newOwnerUnits, setNewOwnerUnits] = useState('1');
   const [ownerFamilyModal, setOwnerFamilyModal] = useState(false);
+  // Users read "چند نفر با حساب من هستند؟" as "how many people are on this
+  // outing" and put their friends there, when it means "whose share do I pay".
+  // The choice is explicit now, and defaults to the common case.
+  const [newOwnerIsFamily, setNewOwnerIsFamily] = useState(false);
+  const [familyInfoModal, setFamilyInfoModal] = useState(false);
   const [ownerFamilyNames, setOwnerFamilyNames] = useState<string[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -766,6 +771,7 @@ function DongoApp() {
     if (memberModal) { setMemberModal(false); return true; }
     if (editMemberModal) { setEditMemberModal(false); return true; }
     if (deleteStoryModal) { setDeleteStoryModal(false); return true; }
+    if (familyInfoModal) { setFamilyInfoModal(false); return true; }
     if (deleteExpenseTarget) { setDeleteExpenseTarget(null); return true; }
     if (pendingTransfer) { setPendingTransfer(null); return true; }
     if (tab !== 'home') { setTab('home'); return true; }
@@ -775,7 +781,7 @@ function DongoApp() {
 
   const canGoBackInApp = ownerFamilyModal || storyModal || joinModal || storySwitcher || finishModal || notificationsModal
     || expenseDetailsModal || expenseModal || memberModal || editMemberModal || deleteStoryModal
-    || Boolean(pendingTransfer) || Boolean(deleteExpenseTarget) || tab !== 'home' || !storiesHome;
+    || Boolean(pendingTransfer) || Boolean(deleteExpenseTarget) || familyInfoModal || tab !== 'home' || !storiesHome;
 
   useEffect(() => {
     if (Platform.OS !== 'android') return;
@@ -789,7 +795,7 @@ function DongoApp() {
       return true;
     });
     return () => subscription.remove();
-  }, [ownerFamilyModal, storyModal, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, pendingTransfer, deleteExpenseTarget, tab, storiesHome]);
+  }, [ownerFamilyModal, storyModal, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, pendingTransfer, deleteExpenseTarget, familyInfoModal, tab, storiesHome]);
 
   useEffect(() => {
     if (!storyId) return;
@@ -900,7 +906,8 @@ function DongoApp() {
   function startStoryCreation() {
     const name = newStoryName.trim();
     if (!name || cloudBusy) return;
-    const ownerUnits = Math.min(12, Math.max(1, Number(newOwnerUnits || 1)));
+    // Choosing "خانواده" means at least two people, whatever the box says.
+    const ownerUnits = Math.min(12, Math.max(newOwnerIsFamily ? 2 : 1, Number(newOwnerUnits || 1)));
     if (ownerUnits > 1) {
       setOwnerFamilyNames(Array.from({ length: ownerUnits - 1 }, (_, index) => ownerFamilyNames[index] ?? ''));
       setStoryModal(false);
@@ -913,7 +920,7 @@ function DongoApp() {
   async function createStory(familyNames: string[]) {
     const name = newStoryName.trim();
     if (!name || cloudBusy) return;
-    const ownerUnits = Math.min(12, Math.max(1, Number(newOwnerUnits || 1)));
+    const ownerUnits = Math.min(12, Math.max(newOwnerIsFamily ? 2 : 1, Number(newOwnerUnits || 1)));
     const cleanFamilyNames = familyNames.map((item) => item.trim());
     if (ownerUnits > 1 && (cleanFamilyNames.length !== ownerUnits - 1 || cleanFamilyNames.some((item) => item.length < 2))) {
       showToast('نام همه اعضای خانواده را وارد کن.');
@@ -970,6 +977,7 @@ function DongoApp() {
   function openNewStory() {
     setNewStoryName('');
     setNewOwnerUnits('1');
+    setNewOwnerIsFamily(false);
     setNewStoryTemplate('restaurant');
     setOwnerFamilyNames([]);
     setOwnerFamilyModal(false);
@@ -1371,6 +1379,103 @@ function DongoApp() {
         </View>
         <ChevronLeft size={20} color={completed ? C.faint : C.purple} />
       </Pressable>
+    );
+  }
+
+  function renderFamilyInfoModal() {
+    return (
+      <Modal visible={familyInfoModal} animationType="fade" transparent onRequestClose={() => setFamilyInfoModal(false)}>
+        <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
+          <View style={styles.finishDialog} accessibilityViewIsModal>
+            <View style={styles.dialogIcon}><Users size={26} color={C.purple} /></View>
+            <AppText style={styles.dialogTitle}>وقتی خانواده را ثبت می‌کنی چه می‌شود؟</AppText>
+
+            <View style={styles.familyInfoRow}>
+              <View style={[styles.familyInfoBullet, { backgroundColor: C.mintPale }]}><Check size={12} color={C.mintDark} /></View>
+              <AppText style={styles.familyInfoText}>در هر خرج، هر عضو خانواده یک سهم جداگانه حساب می‌شود؛ انگار همه سر میز بوده‌اند.</AppText>
+            </View>
+            <View style={styles.familyInfoRow}>
+              <View style={[styles.familyInfoBullet, { backgroundColor: C.mintPale }]}><Check size={12} color={C.mintDark} /></View>
+              <AppText style={styles.familyInfoText}>ولی تسویه یک‌جاست: دنگ همه‌شان روی حساب تو جمع می‌شود و تو یک‌بار پرداخت یا دریافت می‌کنی.</AppText>
+            </View>
+            <View style={styles.familyInfoRow}>
+              <View style={[styles.familyInfoBullet, { backgroundColor: C.debtPale }]}><X size={12} color={C.debt} /></View>
+              <AppText style={styles.familyInfoText}>اینجا جای دوستان نیست. هر کسی که خودش جدا تسویه می‌کند باید عضو جدا باشد.</AppText>
+            </View>
+
+            <AppText style={styles.familyInfoExample}>
+              مثال: شام ۴۰۰ هزار تومان بین ۴ نفر. اگر تو و همسرت با یک حساب باشید، سهم شما ۲۰۰ هزار تومان می‌شود و همان یک مبلغ با تو تسویه می‌شود.
+            </AppText>
+
+            <Pressable accessibilityRole="button" onPress={() => setFamilyInfoModal(false)} style={[styles.expenseDetailsCloseButton, styles.familyInfoButton]}>
+              <AppText style={styles.expenseDetailsCloseText}>متوجه شدم</AppText>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+  function renderStorySheetBody() {
+    return (
+      <>
+        <AppText style={styles.formLabel}>اسم این ماجرا چیه؟</AppText>
+        <TextInput style={styles.formInput} value={newStoryName} onChangeText={setNewStoryName} placeholder="مثلاً شام جمعه" placeholderTextColor={C.faint} textAlign="right" autoFocus />
+
+        <AppText style={styles.formLabel}>دنگ چه کسانی را تو می‌دهی؟</AppText>
+        <View style={styles.payerScope}>
+          <Pressable
+            accessibilityRole="radio"
+            accessibilityState={{ selected: !newOwnerIsFamily }}
+            onPress={() => { setNewOwnerIsFamily(false); setNewOwnerUnits('1'); setOwnerFamilyNames([]); }}
+            style={[styles.payerScopeOption, !newOwnerIsFamily && styles.payerScopeOptionActive]}
+          >
+            <View style={styles.payerScopeCopy}>
+              <AppText style={[styles.payerScopeTitle, !newOwnerIsFamily && styles.payerScopeTitleActive]}>فقط خودم</AppText>
+              <AppText style={styles.payerScopeText}>هر کس دیگری دنگ خودش را می‌دهد.</AppText>
+            </View>
+            {!newOwnerIsFamily && <View style={styles.payerScopeCheck}><Check size={12} color="#FFFFFF" /></View>}
+          </Pressable>
+          <Pressable
+            accessibilityRole="radio"
+            accessibilityState={{ selected: newOwnerIsFamily }}
+            onPress={() => { setNewOwnerIsFamily(true); setNewOwnerUnits('2'); setOwnerFamilyNames(['']); setFamilyInfoModal(true); }}
+            style={[styles.payerScopeOption, newOwnerIsFamily && styles.payerScopeOptionActive]}
+          >
+            <View style={styles.payerScopeCopy}>
+              <AppText style={[styles.payerScopeTitle, newOwnerIsFamily && styles.payerScopeTitleActive]}>من و خانواده‌ام</AppText>
+              <AppText style={styles.payerScopeText}>دنگ آن‌ها هم روی حساب من حساب می‌شود.</AppText>
+            </View>
+            {newOwnerIsFamily && <View style={styles.payerScopeCheck}><Check size={12} color="#FFFFFF" /></View>}
+          </Pressable>
+        </View>
+
+        {newOwnerIsFamily && (
+          <View style={styles.ownerUnitsRow}>
+            <View style={styles.memberUnitsFieldCopy}>
+              <AppText style={styles.formLabelNoMargin}>روی هم چند نفرید؟</AppText>
+              <AppText style={styles.formHelper}>با احتساب خودت. نام بقیه را در مرحله بعد می‌پرسیم.</AppText>
+            </View>
+            <TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits} onChangeText={(value) => setNewOwnerUnits(String(Math.min(12, Number(normalizeDigits(value).replace(/^0+/, '') || 0)) || ''))} placeholder="۲" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" />
+          </View>
+        )}
+
+        <View style={styles.friendsNote}>
+          <AppText style={styles.friendsNoteText}>
+            دوستانت اینجا اضافه نمی‌شوند. آن‌ها حساب جدا دارند و بعد از ساخت ماجرا با دکمه «افزودن نفر» اضافه‌شان می‌کنی.
+          </AppText>
+        </View>
+
+        <AppText style={styles.formLabel}>چه جور ماجراییه؟</AppText>
+        <View style={styles.storyTemplateGrid}>
+          {STORY_TEMPLATES.map((template) => {
+            const active = newStoryTemplate === template.id;
+            return <Pressable key={template.id} accessibilityRole="radio" accessibilityState={{ selected: active }} onPress={() => setNewStoryTemplate(template.id)} style={[styles.storyTemplate, active && styles.storyTemplateActive]}><AppText style={styles.storyTemplateEmoji}>{template.emoji}</AppText><AppText style={[styles.storyTemplateText, active && styles.storyTemplateTextActive]}>{template.label}</AppText>{active && <View style={styles.storyTemplateCheck}><Check size={11} color="#FFFFFF" /></View>}</Pressable>;
+          })}
+        </View>
+        <AppText style={styles.storyHelper}>نوع ماجرا فقط برای ظاهر و پیشنهادهای اولیه است؛ محاسبه دنگ‌ها همیشه یکسان انجام می‌شود.</AppText>
+        <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={startStoryCreation} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
+      </>
     );
   }
 
@@ -1847,27 +1952,17 @@ function DongoApp() {
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
               >
-                <AppText style={styles.formLabel}>اسم این ماجرا چیه؟</AppText>
-                <TextInput style={styles.formInput} value={newStoryName} onChangeText={setNewStoryName} placeholder="مثلاً شام جمعه" placeholderTextColor={C.faint} textAlign="right" autoFocus />
-                <View style={styles.ownerUnitsRow}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب من هستند؟</AppText><AppText style={styles.formHelper}>خودت عضو اصلی هستی؛ نام بقیه را در مرحله بعد می‌پرسیم.</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits} onChangeText={(value) => setNewOwnerUnits(String(Math.min(12, Number(normalizeDigits(value).replace(/^0+/, '') || 0)) || ''))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
-                <AppText style={styles.formLabel}>چه جور ماجراییه؟</AppText>
-                <View style={styles.storyTemplateGrid}>
-                  {STORY_TEMPLATES.map((template) => {
-                    const active = newStoryTemplate === template.id;
-                    return <Pressable key={template.id} accessibilityRole="radio" accessibilityState={{ selected: active }} onPress={() => setNewStoryTemplate(template.id)} style={[styles.storyTemplate, active && styles.storyTemplateActive]}><AppText style={styles.storyTemplateEmoji}>{template.emoji}</AppText><AppText style={[styles.storyTemplateText, active && styles.storyTemplateTextActive]}>{template.label}</AppText>{active && <View style={styles.storyTemplateCheck}><Check size={11} color="#FFFFFF" /></View>}</Pressable>;
-                  })}
-                </View>
-                <AppText style={styles.storyHelper}>نوع ماجرا فقط برای ظاهر و پیشنهادهای اولیه است؛ محاسبه دنگ‌ها همیشه یکسان انجام می‌شود.</AppText>
-                <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={startStoryCreation} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
+                {renderStorySheetBody()}
               </ScrollView>
             </View>
           </View>
         </Modal>
+        {renderFamilyInfoModal()}
         <Modal visible={ownerFamilyModal} animationType="fade" transparent onRequestClose={() => { setOwnerFamilyModal(false); setStoryModal(true); }}>
           <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.familySetupDialog} accessibilityViewIsModal>
-              <View style={styles.familySetupHeader}><View style={styles.dialogIcon}><Users size={25} color={C.purple} /></View><View style={styles.familySetupCopy}><AppText style={styles.familyStepLabel}>مرحله ۲ از ۲</AppText><AppText style={styles.dialogTitle}>اعضای حساب تو</AppText><AppText style={styles.dialogTextCompact}>اسم‌ها باعث می‌شوند موقع ثبت خرج دقیقاً افراد حاضر را انتخاب کنی.</AppText></View></View>
-              <View style={styles.familyHeadRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.familyHeadCopy}><AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText><AppText style={styles.familyHeadName}>{accountName.trim() || 'من (دارنده حساب)'}</AppText></View></View>
+              <View style={styles.familySetupHeader}><View style={styles.dialogIcon}><Users size={25} color={C.purple} /></View><View style={styles.familySetupCopy}><AppText style={styles.familyStepLabel}>مرحله ۲ از ۲</AppText><AppText style={styles.dialogTitle}>اعضای خانواده‌ات</AppText><AppText style={styles.dialogTextCompact}>نام کسانی که دنگشان با حساب توست. موقع ثبت هر خرج می‌توانی مشخص کنی کدامشان بوده‌اند.</AppText></View></View>
+              <View style={styles.familyHeadRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.familyHeadCopy}><AppText style={styles.familyMemberLabel}>خودت · صاحب حساب</AppText><AppText style={styles.familyHeadName}>{accountName.trim() || 'من (دارنده حساب)'}</AppText></View></View>
               <View style={styles.familyInputsContent}>
                 {ownerFamilyNames.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput autoFocus={index === 0} value={value} onChangeText={(text) => setOwnerFamilyNames((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
               </View>
@@ -2064,28 +2159,18 @@ function DongoApp() {
              
               showsVerticalScrollIndicator={false}
             >
-              <AppText style={styles.formLabel}>اسم این ماجرا چیه؟</AppText>
-              <TextInput style={styles.formInput} value={newStoryName} onChangeText={setNewStoryName} placeholder="مثلاً شام جمعه" placeholderTextColor={C.faint} textAlign="right" autoFocus />
-              <View style={styles.ownerUnitsRow}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب من هستند؟</AppText><AppText style={styles.formHelper}>خودت عضو اصلی هستی؛ نام بقیه را در مرحله بعد می‌پرسیم.</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits} onChangeText={(value) => setNewOwnerUnits(String(Math.min(12, Number(normalizeDigits(value).replace(/^0+/, '') || 0)) || ''))} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
-              <AppText style={styles.formLabel}>چه جور ماجراییه؟</AppText>
-              <View style={styles.storyTemplateGrid}>
-                {STORY_TEMPLATES.map((template) => {
-                  const active = newStoryTemplate === template.id;
-                  return <Pressable key={template.id} accessibilityRole="radio" accessibilityState={{ selected: active }} onPress={() => setNewStoryTemplate(template.id)} style={[styles.storyTemplate, active && styles.storyTemplateActive]}><AppText style={styles.storyTemplateEmoji}>{template.emoji}</AppText><AppText style={[styles.storyTemplateText, active && styles.storyTemplateTextActive]}>{template.label}</AppText>{active && <View style={styles.storyTemplateCheck}><Check size={11} color="#FFFFFF" /></View>}</Pressable>;
-                })}
-              </View>
-              <AppText style={styles.storyHelper}>نوع ماجرا فقط برای ظاهر و پیشنهادهای اولیه است؛ محاسبه دنگ‌ها همیشه یکسان انجام می‌شود.</AppText>
-              <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={startStoryCreation} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}><Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>ساخت ماجرا</AppText></Pressable>
+              {renderStorySheetBody()}
             </ScrollView>
           </View>
         </View>
       </Modal>
 
+      {renderFamilyInfoModal()}
       <Modal visible={ownerFamilyModal} animationType="fade" transparent onRequestClose={() => { setOwnerFamilyModal(false); setStoryModal(true); }}>
         <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.familySetupDialog} accessibilityViewIsModal>
-            <View style={styles.familySetupHeader}><View style={styles.dialogIcon}><Users size={25} color={C.purple} /></View><View style={styles.familySetupCopy}><AppText style={styles.familyStepLabel}>مرحله ۲ از ۲</AppText><AppText style={styles.dialogTitle}>اعضای حساب تو</AppText><AppText style={styles.dialogTextCompact}>اسم‌ها باعث می‌شوند موقع ثبت خرج دقیقاً افراد حاضر را انتخاب کنی.</AppText></View></View>
-            <View style={styles.familyHeadRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.familyHeadCopy}><AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText><AppText style={styles.familyHeadName}>{accountName.trim() || 'من (دارنده حساب)'}</AppText></View></View>
+            <View style={styles.familySetupHeader}><View style={styles.dialogIcon}><Users size={25} color={C.purple} /></View><View style={styles.familySetupCopy}><AppText style={styles.familyStepLabel}>مرحله ۲ از ۲</AppText><AppText style={styles.dialogTitle}>اعضای خانواده‌ات</AppText><AppText style={styles.dialogTextCompact}>نام کسانی که دنگشان با حساب توست. موقع ثبت هر خرج می‌توانی مشخص کنی کدامشان بوده‌اند.</AppText></View></View>
+            <View style={styles.familyHeadRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.familyHeadCopy}><AppText style={styles.familyMemberLabel}>خودت · صاحب حساب</AppText><AppText style={styles.familyHeadName}>{accountName.trim() || 'من (دارنده حساب)'}</AppText></View></View>
             <View style={styles.familyInputsContent}>
               {ownerFamilyNames.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput autoFocus={index === 0} value={value} onChangeText={(text) => setOwnerFamilyNames((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
             </View>
@@ -2568,6 +2653,21 @@ const styles = StyleSheet.create({
   memberUnitsField: { width: '100%', minHeight: 68, borderRadius: 17, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, marginTop: 10, padding: 10, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
   memberUnitsFieldCopy: { flex: 1, alignItems: 'flex-end' },
   memberUnitsInput: { width: 58, height: 48, borderRadius: 14, backgroundColor: C.purplePale, borderWidth: 1, borderColor: '#D7CEF8', fontFamily: F.extra, color: C.purple, fontSize: 18 },
+  payerScope: { gap: 9, marginTop: 4 },
+  payerScopeOption: { minHeight: 62, borderRadius: 17, borderWidth: 1.5, borderColor: C.line, backgroundColor: C.paper, paddingHorizontal: 14, paddingVertical: 11, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
+  payerScopeOptionActive: { borderColor: C.purple, backgroundColor: C.purplePale },
+  payerScopeCopy: { flex: 1, alignItems: 'flex-end' },
+  payerScopeTitle: { fontFamily: F.bold, fontSize: 13, textAlign: 'right' },
+  payerScopeTitleActive: { color: C.purpleDark },
+  payerScopeText: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 18, textAlign: 'right', marginTop: 2 },
+  payerScopeCheck: { width: 22, height: 22, borderRadius: 8, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center' },
+  friendsNote: { flexDirection: 'row-reverse', gap: 8, borderRadius: 15, backgroundColor: C.yellowPale, padding: 12, marginTop: 11 },
+  friendsNoteText: { flex: 1, fontFamily: F.medium, fontSize: 10, color: '#7A5B12', lineHeight: 19, textAlign: 'right' },
+  familyInfoRow: { flexDirection: 'row-reverse', gap: 9, alignItems: 'flex-start', marginTop: 10 },
+  familyInfoBullet: { width: 21, height: 21, borderRadius: 7, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  familyInfoText: { flex: 1, fontFamily: F.medium, fontSize: 11, color: C.ink, lineHeight: 20, textAlign: 'right' },
+  familyInfoButton: { alignSelf: 'stretch' },
+  familyInfoExample: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 19, textAlign: 'right', backgroundColor: C.canvas, borderRadius: 12, padding: 11, marginTop: 12 },
   ownerUnitsRow: { minHeight: 67, borderRadius: 17, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, marginTop: 10, padding: 10, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
   welcomeBrand: { height: 72, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   welcomeContent: { paddingHorizontal: 22, paddingBottom: 34, alignItems: 'center' },
