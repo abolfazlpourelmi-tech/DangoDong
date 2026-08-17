@@ -8,6 +8,17 @@ declare module 'react-native-tapsell-plus' {
     error_message?: string;
   };
 
+  /** Fields a native ("همسان") zone hands back. Any of them may be absent. */
+  export type TapsellPlusNativeAd = TapsellPlusEvent & {
+    ad_id?: string;
+    title?: string;
+    description?: string;
+    call_to_action_text?: string;
+    icon_url?: string;
+    portrait_static_image_url?: string;
+    landscape_static_image_url?: string;
+  };
+
   export const TapsellPlusBannerType: {
     BANNER_320x50: 1;
     BANNER_320x100: 2;
@@ -34,6 +45,13 @@ declare module 'react-native-tapsell-plus' {
       onClosed: (event: TapsellPlusEvent) => void,
       onError: (event: TapsellPlusEvent) => void,
     ): void;
+    static requestNativeAd(zoneId: string): Promise<string>;
+    static showNativeAd(
+      responseId: string,
+      onOpened: (ad: TapsellPlusNativeAd) => void,
+      onError: (event: TapsellPlusEvent) => void,
+    ): void;
+    static nativeAdClicked(responseId: string): void;
     static requestStandardBannerAd(zoneId: string, bannerType: number): Promise<string>;
     static showStandardBannerAd(
       responseId: string,

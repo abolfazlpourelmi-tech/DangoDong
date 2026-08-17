@@ -46,12 +46,14 @@ import { displayablePhone, toIranPhone, toLatinDigits } from './src/phone';
 import { supabase } from './src/supabase';
 import {
   type AdDiagnostics,
+  type NativeAdContent,
+  clearHomeNativeAd,
   getAdDiagnostics,
-  hideHomeBanner,
+  loadHomeNativeAd,
   preloadExpenseInterstitial,
+  reportNativeAdClick,
   retryAds,
-  setBannerVisibilityListener,
-  showHomeBanner,
+  setNativeAdListener,
   showExpenseInterstitial,
 } from './src/tapsellAds';
 import {
@@ -296,16 +298,13 @@ function CategoryBadge({ category, size = 48 }: { category?: ExpenseCategory; si
 function DongoApp() {
   const insets = useSafeAreaInsets();
   const { keyboardVisible, keyboardInset, windowHeight } = useKeyboardInset();
-  // A Tapsell banner is a native view laid over the bottom of the screen, so the
-  // app has to lift its own chrome above it while one is actually on screen.
-  const [bannerVisible, setBannerVisible] = useState(false);
+  const [homeAd, setHomeAd] = useState<NativeAdContent | null>(null);
 
   // Edge-to-edge means the system navigation bar sits on top of the app, so the
   // bottom inset has to be reserved by hand or content hides underneath it.
   // When the keyboard is up it already covers that area, so take the larger of
   // the two rather than stacking them.
-  const bannerInset = bannerVisible && !keyboardVisible ? 50 : 0;
-  const bottomInset = Math.max(keyboardInset, insets.bottom + bannerInset);
+  const bottomInset = Math.max(keyboardInset, insets.bottom);
   // Sheets are anchored to the bottom, so they have to give the keyboard its
   // space explicitly; a fixed height keeps the internal ScrollView scrollable
   // instead of letting percentage heights re-resolve on every keyboard frame.
@@ -739,24 +738,25 @@ function DongoApp() {
     return () => clearInterval(timer);
   }, [phoneOtpExpiresAt]);
 
+  // Subscribing is platform-agnostic; only the fetching is Android-only.
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    void preloadExpenseInterstitial();
-    setBannerVisibilityListener(setBannerVisible);
+    setNativeAdListener(setHomeAd);
     return () => {
-      setBannerVisibilityListener(null);
-      hideHomeBanner();
+      setNativeAdListener(null);
+      clearHomeNativeAd();
     };
   }, []);
 
-  // The banner lives on a story's home screen. Tapsell positions it natively by
-  // gravity, so it can only sit against a screen edge — it cannot be placed
-  // inline under the balance card. It goes at the bottom, and bannerInset below
-  // lifts the nav and the scroll tail clear of it.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    if (tab === 'home' && !storiesHome) void showHomeBanner();
-    else hideHomeBanner();
+    void preloadExpenseInterstitial();
+  }, []);
+
+  // The ad card belongs under the balance card on a story's home screen.
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    if (tab === 'home' && !storiesHome) void loadHomeNativeAd();
+    else clearHomeNativeAd();
   }, [tab, storiesHome]);
 
   function goBackInApp() {
@@ -1530,10 +1530,10 @@ function DongoApp() {
                 </AppText>
                 {adInfo.interstitial.lastError ? <AppText style={styles.adPanelError} selectable>{adInfo.interstitial.lastError}</AppText> : null}
                 <AppText style={styles.adPanelRow}>
-                  بنر: {adInfo.banner.visible ? 'روی صفحه ✓' : adInfo.banner.requesting ? 'در حال درخواست…' : adInfo.banner.wanted ? 'درخواست‌شده، هنوز نیامده' : 'غیرفعال'}
+                  کارت همسان: {adInfo.nativeAd.loaded ? 'روی صفحه ✓' : adInfo.nativeAd.requesting ? 'در حال درخواست…' : 'نیامده'}
                 </AppText>
-                {adInfo.banner.lastError ? <AppText style={styles.adPanelError} selectable>{adInfo.banner.lastError}</AppText> : null}
-                {!adInfo.interstitial.lastError && !adInfo.banner.lastError && (
+                {adInfo.nativeAd.lastError ? <AppText style={styles.adPanelError} selectable>{adInfo.nativeAd.lastError}</AppText> : null}
+                {!adInfo.interstitial.lastError && !adInfo.nativeAd.lastError && (
                   <AppText style={styles.adPanelHint}>تا این لحظه خطایی ثبت نشده.</AppText>
                 )}
               </>
@@ -1647,6 +1647,29 @@ function DongoApp() {
           </View>
           <Image source={require('./assets/dong-mascot-optimized.png')} style={styles.heroMascot} resizeMode="contain" />
         </LinearGradient>
+
+        {homeAd && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`تبلیغ: ${homeAd.title ?? ''}`}
+            onPress={() => reportNativeAdClick(homeAd.responseId)}
+            style={({ pressed }) => [styles.adCard, pressed && styles.pressed]}
+          >
+            {homeAd.iconUrl || homeAd.imageUrl
+              ? <Image source={{ uri: homeAd.iconUrl ?? homeAd.imageUrl }} style={styles.adCardImage} resizeMode="cover" />
+              : null}
+            <View style={styles.adCardCopy}>
+              <View style={styles.adCardTitleRow}>
+                <View style={styles.adCardTag}><AppText style={styles.adCardTagText}>تبلیغ</AppText></View>
+                <AppText numberOfLines={1} style={styles.adCardTitle}>{homeAd.title ?? 'پیشنهاد ویژه'}</AppText>
+              </View>
+              {homeAd.description ? <AppText numberOfLines={2} style={styles.adCardText}>{homeAd.description}</AppText> : null}
+            </View>
+            {homeAd.callToAction
+              ? <View style={styles.adCardCta}><AppText style={styles.adCardCtaText}>{homeAd.callToAction}</AppText></View>
+              : <ChevronLeft size={18} color={C.purple} />}
+          </Pressable>
+        )}
 
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: C.yellowPale }]}>
@@ -2017,7 +2040,7 @@ function DongoApp() {
           </>
         )}
         {/* Extra room so account fields stay scrollable above the keyboard. */}
-        <View style={{ height: (keyboardVisible ? keyboardInset : insets.bottom + bannerInset) + 118 }} />
+        <View style={{ height: (keyboardVisible ? keyboardInset : insets.bottom) + 118 }} />
       </ScrollView>
 
       {toast ? (
@@ -2029,7 +2052,7 @@ function DongoApp() {
 
       {/* The nav floats above the content, so with the keyboard up it would
           otherwise hover over the keyboard and cover the field being typed in. */}
-      {!keyboardVisible && <View style={[styles.bottomNav, { bottom: insets.bottom + bannerInset + 10 }]}>
+      {!keyboardVisible && <View style={[styles.bottomNav, { bottom: insets.bottom + 10 }]}>
         <Pressable accessibilityRole="tab" accessibilityState={{ selected: storiesHome }} onPress={() => { setStoriesHome(true); setTab('home'); }} style={styles.navItem}>
           <View style={[styles.navIconWrap, storiesHome && styles.navIconWrapActive]}><Home size={21} color={storiesHome ? C.purple : C.faint} fill={storiesHome ? C.purplePale : 'transparent'} /></View>
           <AppText style={[styles.navLabel, storiesHome && styles.navLabelActive]}>ماجراها</AppText>
@@ -2461,6 +2484,16 @@ const styles = StyleSheet.create({
   heroAmount: { fontFamily: F.black, color: '#FFFFFF', fontSize: 25, lineHeight: 40, textAlign: 'right' },
   heroHint: { fontFamily: F.medium, color: '#EAE6FF', fontSize: 11, lineHeight: 19, textAlign: 'right', marginTop: 4 },
   heroMascot: { width: 152, height: 184, marginLeft: -32, marginBottom: -21 },
+  adCard: { flexDirection: 'row-reverse', alignItems: 'center', gap: 11, backgroundColor: C.paper, borderRadius: 22, borderWidth: 1, borderColor: C.line, padding: 12, marginTop: 12 },
+  adCardImage: { width: 52, height: 52, borderRadius: 16, backgroundColor: C.canvas },
+  adCardCopy: { flex: 1, alignItems: 'flex-end' },
+  adCardTitleRow: { flexDirection: 'row-reverse', alignItems: 'center', gap: 6 },
+  adCardTag: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 7, backgroundColor: C.yellowPale },
+  adCardTagText: { fontFamily: F.bold, fontSize: 8, color: '#8A6410' },
+  adCardTitle: { flex: 1, fontFamily: F.bold, fontSize: 12, textAlign: 'right' },
+  adCardText: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 17, textAlign: 'right', marginTop: 3 },
+  adCardCta: { paddingHorizontal: 11, minHeight: 33, borderRadius: 12, backgroundColor: C.purplePale, alignItems: 'center', justifyContent: 'center' },
+  adCardCtaText: { fontFamily: F.bold, fontSize: 10, color: C.purpleDark },
   statsRow: { flexDirection: 'row-reverse', gap: 10, marginTop: 18 },
   statCard: { flex: 1, minHeight: 82, borderRadius: 22, padding: 12, flexDirection: 'row-reverse', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: 'rgba(37,32,58,0.05)' },
   statIcon: { width: 39, height: 39, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },

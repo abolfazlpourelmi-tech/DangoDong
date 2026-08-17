@@ -1,5 +1,14 @@
 // The web preview has no ad SDK; every entry point is a no-op so callers do
 // not need platform checks.
+export type NativeAdContent = {
+  responseId: string;
+  title?: string;
+  description?: string;
+  callToAction?: string;
+  iconUrl?: string;
+  imageUrl?: string;
+};
+
 export function preloadExpenseInterstitial() {
   return Promise.resolve();
 }
@@ -8,15 +17,20 @@ export function showExpenseInterstitial() {
   return Promise.resolve(false);
 }
 
-export function showHomeBanner() {
+export function loadHomeNativeAd() {
   return Promise.resolve();
 }
 
-export function hideHomeBanner() {
+export function clearHomeNativeAd() {
   // no-op
 }
 
-export function setBannerVisibilityListener(_listener: ((visible: boolean) => void) | null) {
+export function setNativeAdListener(listener: ((ad: NativeAdContent | null) => void) | null) {
+  listener?.(null);
+}
+
+
+export function reportNativeAdClick(_responseId: string) {
   // no-op
 }
 
@@ -24,7 +38,7 @@ export function getAdDiagnostics() {
   return {
     moduleLinked: false,
     interstitial: { ready: false, requesting: false, lastError: 'روی وب تبلیغی وجود ندارد' },
-    banner: { wanted: false, visible: false, requesting: false, lastError: 'روی وب تبلیغی وجود ندارد' },
+    nativeAd: { loaded: false, requesting: false, lastError: 'روی وب تبلیغی وجود ندارد' },
   };
 }
 

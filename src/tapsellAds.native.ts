@@ -1,9 +1,5 @@
 import { NativeModules } from 'react-native';
-import TapsellPlus, {
-  TapsellPlusBannerType,
-  TapsellPlusHorizontalGravity,
-  TapsellPlusVerticalGravity,
-} from 'react-native-tapsell-plus';
+import TapsellPlus from 'react-native-tapsell-plus';
 
 /**
  * These come from the Tapsell publisher dashboard at app.tapsell.ir, under the
@@ -18,7 +14,12 @@ import TapsellPlus, {
  */
 const APP_KEY = 'dqihompffbhoojnktithkstseikdnislmqntlhibcqflgggoijpkanodelbjnfejtbfhqi';
 const EXPENSE_INTERSTITIAL_ZONE_ID = '6a7e3fb7c946be46b1574ee5';
-const HOME_BANNER_ZONE_ID = '6a7ecb5ca192ce423b372711';
+// A native ("بنر همسان") zone, not a standard banner. A standard banner is a
+// native view the SDK pins to a screen edge by gravity, so it could never sit
+// under the balance card — and under edge-to-edge its bottom edge lands behind
+// the system navigation bar. A native zone hands back the raw creative instead,
+// which the app renders as its own card exactly where it belongs.
+const HOME_NATIVE_ZONE_ID = '6a83374bb471e817c86ad892';
 
 /**
  * The SDK needs a moment to reach Tapsell's servers, so a request fired in the
@@ -27,7 +28,7 @@ const HOME_BANNER_ZONE_ID = '6a7ecb5ca192ce423b372711';
  */
 const RETRY_DELAYS_MS = [4_000, 15_000, 45_000];
 
-type AdKind = 'interstitial' | 'banner';
+type AdKind = 'interstitial' | 'native';
 
 const lastFailure: Partial<Record<AdKind, string>> = {};
 
@@ -35,7 +36,7 @@ export type AdDiagnostics = {
   /** False means autolinking did not register the native module at all. */
   moduleLinked: boolean;
   interstitial: { ready: boolean; requesting: boolean; lastError?: string };
-  banner: { wanted: boolean; visible: boolean; requesting: boolean; lastError?: string };
+  nativeAd: { loaded: boolean; requesting: boolean; lastError?: string };
 };
 
 function describe(reason: unknown) {
@@ -147,106 +148,103 @@ export async function showExpenseInterstitial(): Promise<boolean> {
   }
 }
 
-// ----------------------------------------------------------------- banner --
+// ------------------------------------------------------------- native ad --
 
-let bannerResponseId: string | null = null;
-let bannerRequest: Promise<void> | null = null;
-let bannerAttempt = 0;
-let bannerTimer: ReturnType<typeof setTimeout> | null = null;
-let bannerWanted = false;
-let bannerOnScreen = false;
-let onBannerVisible: ((visible: boolean) => void) | null = null;
+export type NativeAdContent = {
+  responseId: string;
+  title?: string;
+  description?: string;
+  callToAction?: string;
+  iconUrl?: string;
+  imageUrl?: string;
+};
 
-/**
- * The banner is a native view pinned over the bottom of the screen, so the app
- * has to know when it is actually on screen — otherwise it sits on top of the
- * bottom navigation.
- */
-export function setBannerVisibilityListener(listener: ((visible: boolean) => void) | null) {
-  onBannerVisible = listener;
+let nativeAd: NativeAdContent | null = null;
+let nativeRequest: Promise<void> | null = null;
+let nativeAttempt = 0;
+let nativeTimer: ReturnType<typeof setTimeout> | null = null;
+let nativeWanted = false;
+let onNativeAd: ((ad: NativeAdContent | null) => void) | null = null;
+
+/** The app renders the creative itself, so it needs to be handed the content. */
+export function setNativeAdListener(listener: ((ad: NativeAdContent | null) => void) | null) {
+  onNativeAd = listener;
+  if (listener) listener(nativeAd);
 }
 
-function scheduleBannerRetry() {
-  const delay = RETRY_DELAYS_MS[bannerAttempt];
+function scheduleNativeRetry() {
+  const delay = RETRY_DELAYS_MS[nativeAttempt];
   if (delay === undefined) return;
-  bannerAttempt += 1;
-  if (bannerTimer) clearTimeout(bannerTimer);
-  bannerTimer = setTimeout(() => {
-    bannerTimer = null;
-    if (bannerWanted) void showHomeBanner();
+  nativeAttempt += 1;
+  if (nativeTimer) clearTimeout(nativeTimer);
+  nativeTimer = setTimeout(() => {
+    nativeTimer = null;
+    if (nativeWanted) void loadHomeNativeAd();
   }, delay);
 }
 
-export function showHomeBanner(): Promise<void> {
+export function loadHomeNativeAd(): Promise<void> {
   ensureInitialised();
-  bannerWanted = true;
-  if (bannerResponseId || bannerRequest) return bannerRequest ?? Promise.resolve();
+  nativeWanted = true;
+  if (nativeAd || nativeRequest) return nativeRequest ?? Promise.resolve();
 
-  bannerRequest = Promise.resolve(
-    TapsellPlus.requestStandardBannerAd(HOME_BANNER_ZONE_ID, TapsellPlusBannerType.BANNER_320x50),
-  )
+  nativeRequest = Promise.resolve(TapsellPlus.requestNativeAd(HOME_NATIVE_ZONE_ID))
     .then((responseId) => {
-      // The screen may have been left while the request was in flight.
-      if (!bannerWanted) {
-        void TapsellPlus.destroyStandardBannerAd(responseId).catch(() => undefined);
-        return;
-      }
-      bannerResponseId = responseId;
-      bannerAttempt = 0;
-      clearNote('banner');
-      TapsellPlus.showStandardBannerAd(
+      if (!nativeWanted) return; // Screen was left while the request was in flight.
+      TapsellPlus.showNativeAd(
         responseId,
-        // The package's enum names are swapped: the "horizontal" one holds
-        // TOP/CENTER/BOTTOM and the "vertical" one holds LEFT/RIGHT/CENTER.
-        // Bottom of the screen, centred across it.
-        TapsellPlusHorizontalGravity.BOTTOM,
-        TapsellPlusVerticalGravity.CENTER,
-        () => {
-          clearNote('banner');
-          bannerOnScreen = true;
-          onBannerVisible?.(true);
+        (event) => {
+          nativeAttempt = 0;
+          clearNote('native');
+          nativeAd = {
+            responseId,
+            title: event.title,
+            description: event.description,
+            callToAction: event.call_to_action_text,
+            iconUrl: event.icon_url,
+            imageUrl: event.portrait_static_image_url ?? event.landscape_static_image_url,
+          };
+          onNativeAd?.(nativeAd);
         },
         (event) => {
-          note('banner', 'show', event);
-          bannerResponseId = null;
-          bannerOnScreen = false;
-          onBannerVisible?.(false);
-          scheduleBannerRetry();
+          note('native', 'show', event);
+          nativeAd = null;
+          onNativeAd?.(null);
+          scheduleNativeRetry();
         },
       );
     })
     .catch((error: unknown) => {
-      bannerResponseId = null;
-      note('banner', 'request', error);
-      scheduleBannerRetry();
+      nativeAd = null;
+      note('native', 'request', error);
+      scheduleNativeRetry();
     })
     .finally(() => {
-      bannerRequest = null;
+      nativeRequest = null;
     });
 
-  return bannerRequest;
+  return nativeRequest;
 }
 
-/** Tears the banner down when leaving the home screen. */
-export function hideHomeBanner() {
-  bannerWanted = false;
-  bannerAttempt = 0;
-  if (bannerTimer) {
-    clearTimeout(bannerTimer);
-    bannerTimer = null;
+/** Stops retrying and drops the creative when the host screen goes away. */
+export function clearHomeNativeAd() {
+  nativeWanted = false;
+  nativeAttempt = 0;
+  if (nativeTimer) {
+    clearTimeout(nativeTimer);
+    nativeTimer = null;
   }
-  if (bannerResponseId) {
-    const responseId = bannerResponseId;
-    bannerResponseId = null;
-    try {
-      TapsellPlus.hideStandardBanner();
-      void Promise.resolve(TapsellPlus.destroyStandardBannerAd(responseId)).catch(() => undefined);
-    } catch (error) {
-      note('banner', 'destroy', error);
-    }
+  nativeAd = null;
+  onNativeAd?.(null);
+}
+
+/** Tapsell counts the click only if it is reported back. */
+export function reportNativeAdClick(responseId: string) {
+  try {
+    TapsellPlus.nativeAdClicked(responseId);
+  } catch (error) {
+    note('native', 'click', error);
   }
-  bannerOnScreen = false;
-  onBannerVisible?.(false);
 }
 
 // ------------------------------------------------------------ diagnostics --
@@ -263,11 +261,10 @@ export function getAdDiagnostics(): AdDiagnostics {
       requesting: Boolean(interstitialRequest),
       lastError: lastFailure.interstitial,
     },
-    banner: {
-      wanted: bannerWanted,
-      visible: bannerOnScreen,
-      requesting: Boolean(bannerRequest),
-      lastError: lastFailure.banner,
+    nativeAd: {
+      loaded: Boolean(nativeAd),
+      requesting: Boolean(nativeRequest),
+      lastError: lastFailure.native,
     },
   };
 }
@@ -275,9 +272,9 @@ export function getAdDiagnostics(): AdDiagnostics {
 /** Clears the backoff and asks for both slots again, for a manual retry. */
 export function retryAds() {
   interstitialAttempt = 0;
-  bannerAttempt = 0;
+  nativeAttempt = 0;
   if (interstitialTimer) { clearTimeout(interstitialTimer); interstitialTimer = null; }
-  if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+  if (nativeTimer) { clearTimeout(nativeTimer); nativeTimer = null; }
   void preloadExpenseInterstitial();
-  if (bannerWanted) void showHomeBanner();
+  if (nativeWanted) void loadHomeNativeAd();
 }
