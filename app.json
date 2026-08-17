@@ -2,7 +2,7 @@
   "expo": {
     "name": "دنگودونگ",
     "slug": "dangodong",
-    "version": "1.8.0",
+    "version": "1.8.1",
     "icon": "./assets/app-icon-v2.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -13,7 +13,7 @@
     },
     "android": {
       "package": "com.dong.mobile",
-      "versionCode": 25,
+      "versionCode": 26,
       "adaptiveIcon": {
         "foregroundImage": "./assets/app-icon-v2.png",
         "backgroundColor": "#FFF4E6"

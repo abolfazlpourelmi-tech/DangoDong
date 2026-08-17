@@ -47,11 +47,11 @@ import { supabase } from './src/supabase';
 import {
   type AdDiagnostics,
   getAdDiagnostics,
-  hideAccountBanner,
+  hideHomeBanner,
   preloadExpenseInterstitial,
   retryAds,
   setBannerVisibilityListener,
-  showAccountBanner,
+  showHomeBanner,
   showExpenseInterstitial,
 } from './src/tapsellAds';
 import {
@@ -740,16 +740,18 @@ function DongoApp() {
     setBannerVisibilityListener(setBannerVisible);
     return () => {
       setBannerVisibilityListener(null);
-      hideAccountBanner();
+      hideHomeBanner();
     };
   }, []);
 
-  // The banner belongs to the account screen; requesting it at launch left it
-  // covering the app from the first second and it was never taken down again.
+  // The banner lives on a story's home screen. Tapsell positions it natively by
+  // gravity, so it can only sit against a screen edge — it cannot be placed
+  // inline under the balance card. It goes at the bottom, and bannerInset below
+  // lifts the nav and the scroll tail clear of it.
   useEffect(() => {
     if (Platform.OS !== 'android') return;
-    if (tab === 'account' && !storiesHome) void showAccountBanner();
-    else hideAccountBanner();
+    if (tab === 'home' && !storiesHome) void showHomeBanner();
+    else hideHomeBanner();
   }, [tab, storiesHome]);
 
   function goBackInApp() {

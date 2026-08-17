@@ -18,7 +18,7 @@ import TapsellPlus, {
  */
 const APP_KEY = 'dqihompffbhoojnktithkstseikdnislmqntlhibcqflgggoijpkanodelbjnfejtbfhqi';
 const EXPENSE_INTERSTITIAL_ZONE_ID = '6a7e3fb7c946be46b1574ee5';
-const ACCOUNT_BANNER_ZONE_ID = '6a7ecb5ca192ce423b372711';
+const HOME_BANNER_ZONE_ID = '6a7ecb5ca192ce423b372711';
 
 /**
  * The SDK needs a moment to reach Tapsell's servers, so a request fired in the
@@ -173,17 +173,17 @@ function scheduleBannerRetry() {
   if (bannerTimer) clearTimeout(bannerTimer);
   bannerTimer = setTimeout(() => {
     bannerTimer = null;
-    if (bannerWanted) void showAccountBanner();
+    if (bannerWanted) void showHomeBanner();
   }, delay);
 }
 
-export function showAccountBanner(): Promise<void> {
+export function showHomeBanner(): Promise<void> {
   ensureInitialised();
   bannerWanted = true;
   if (bannerResponseId || bannerRequest) return bannerRequest ?? Promise.resolve();
 
   bannerRequest = Promise.resolve(
-    TapsellPlus.requestStandardBannerAd(ACCOUNT_BANNER_ZONE_ID, TapsellPlusBannerType.BANNER_320x50),
+    TapsellPlus.requestStandardBannerAd(HOME_BANNER_ZONE_ID, TapsellPlusBannerType.BANNER_320x50),
   )
     .then((responseId) => {
       // The screen may have been left while the request was in flight.
@@ -227,8 +227,8 @@ export function showAccountBanner(): Promise<void> {
   return bannerRequest;
 }
 
-/** Tears the banner down when leaving the screen that hosts it. */
-export function hideAccountBanner() {
+/** Tears the banner down when leaving the home screen. */
+export function hideHomeBanner() {
   bannerWanted = false;
   bannerAttempt = 0;
   if (bannerTimer) {
@@ -279,5 +279,5 @@ export function retryAds() {
   if (interstitialTimer) { clearTimeout(interstitialTimer); interstitialTimer = null; }
   if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
   void preloadExpenseInterstitial();
-  if (bannerWanted) void showAccountBanner();
+  if (bannerWanted) void showHomeBanner();
 }

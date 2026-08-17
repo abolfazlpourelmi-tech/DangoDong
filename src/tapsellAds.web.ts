@@ -8,11 +8,11 @@ export function showExpenseInterstitial() {
   return Promise.resolve(false);
 }
 
-export function showAccountBanner() {
+export function showHomeBanner() {
   return Promise.resolve();
 }
 
-export function hideAccountBanner() {
+export function hideHomeBanner() {
   // no-op
 }
 
