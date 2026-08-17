@@ -1,3 +1,4 @@
+import { NativeModules } from 'react-native';
 import {
   BannerPosition,
   BannerSize,
@@ -24,9 +25,43 @@ type AdKind = 'interstitial' | 'banner';
 
 const lastFailure: Partial<Record<AdKind, string>> = {};
 
-/** Last known reason each ad slot came up empty. Surfaced for diagnostics. */
-export function getAdDiagnostics(): Partial<Record<AdKind, string>> {
-  return { ...lastFailure };
+export type AdDiagnostics = {
+  /** False means autolinking did not register the native module at all. */
+  moduleLinked: boolean;
+  interstitial: { ready: boolean; requesting: boolean; lastError?: string };
+  banner: { wanted: boolean; visible: boolean; requesting: boolean; lastError?: string };
+};
+
+/**
+ * Google's Android downloads are unreachable from Iran, so adb is not an
+ * option for the people running this app. These numbers are surfaced on a
+ * hidden panel in the account screen instead of only going to logcat.
+ */
+export function getAdDiagnostics(): AdDiagnostics {
+  return {
+    moduleLinked: Boolean(NativeModules.RNTapsellMediation),
+    interstitial: {
+      ready: Boolean(interstitialAdId),
+      requesting: Boolean(interstitialRequest),
+      lastError: lastFailure.interstitial,
+    },
+    banner: {
+      wanted: bannerWanted,
+      visible: bannerOnScreen,
+      requesting: Boolean(bannerRequest),
+      lastError: lastFailure.banner,
+    },
+  };
+}
+
+/** Clears the backoff and asks for both slots again, for a manual retry. */
+export function retryAds() {
+  interstitialAttempt = 0;
+  bannerAttempt = 0;
+  if (interstitialTimer) { clearTimeout(interstitialTimer); interstitialTimer = null; }
+  if (bannerTimer) { clearTimeout(bannerTimer); bannerTimer = null; }
+  void preloadExpenseInterstitial();
+  if (bannerWanted) void showAccountBanner();
 }
 
 function note(kind: AdKind, stage: string, reason: unknown) {
@@ -120,6 +155,7 @@ let bannerAttempt = 0;
 let bannerTimer: ReturnType<typeof setTimeout> | null = null;
 let bannerWanted = false;
 let onBannerVisible: ((visible: boolean) => void) | null = null;
+let bannerOnScreen = false;
 
 /**
  * The banner is a native view pinned over the bottom of the screen, so the app
@@ -158,12 +194,14 @@ export function showAccountBanner(): Promise<void> {
       showBannerAd(adId, BannerPosition.Bottom, {
         onAdImpression: () => {
           clearNote('banner');
+          bannerOnScreen = true;
           onBannerVisible?.(true);
         },
         onAdClicked: () => undefined,
         onAdFailed: (error) => {
           note('banner', 'show', error);
           bannerAdId = null;
+          bannerOnScreen = false;
           onBannerVisible?.(false);
           scheduleBannerRetry();
         },
@@ -197,5 +235,6 @@ export function hideAccountBanner() {
     }
     bannerAdId = null;
   }
+  bannerOnScreen = false;
   onBannerVisible?.(false);
 }

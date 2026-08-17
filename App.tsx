@@ -45,8 +45,11 @@ import { AuthGate } from './src/AuthGate';
 import { displayablePhone, toIranPhone, toLatinDigits } from './src/phone';
 import { supabase } from './src/supabase';
 import {
+  type AdDiagnostics,
+  getAdDiagnostics,
   hideAccountBanner,
   preloadExpenseInterstitial,
+  retryAds,
   setBannerVisibilityListener,
   showAccountBanner,
   showExpenseInterstitial,
@@ -390,6 +393,11 @@ function DongoApp() {
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountError, setAccountError] = useState('');
   const [memberCards, setMemberCards] = useState<Record<string, string>>({});
+  // Hidden behind a long-press on the account header. Google's Android
+  // downloads are blocked from Iran, so adb logcat is not reachable for the
+  // people who need to know why an ad slot is empty.
+  const [adPanelOpen, setAdPanelOpen] = useState(false);
+  const [adInfo, setAdInfo] = useState<AdDiagnostics | null>(null);
   const lastBackPressAt = useRef(0);
 
   const balances = useMemo(() => applySettlementPayments(calculateBalances(members, expenses), payments), [members, expenses, payments]);
@@ -709,6 +717,14 @@ function DongoApp() {
   useEffect(() => () => {
     if (toastTimer.current) clearTimeout(toastTimer.current);
   }, []);
+
+  useEffect(() => {
+    if (!adPanelOpen) return;
+    const read = () => setAdInfo(getAdDiagnostics());
+    read();
+    const timer = setInterval(read, 2000);
+    return () => clearInterval(timer);
+  }, [adPanelOpen]);
 
   useEffect(() => {
     if (!phoneOtpExpiresAt) return;
@@ -1382,10 +1398,45 @@ function DongoApp() {
   function renderAccount() {
     return (
       <View style={styles.accountPage}>
-        <View style={styles.accountHero}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="حساب کاربری"
+          accessibilityHint="نگه‌داشتن طولانی، وضعیت فنی تبلیغ‌ها را نشان می‌دهد"
+          delayLongPress={800}
+          onLongPress={() => { setAdPanelOpen((open) => !open); void Haptics.selectionAsync(); }}
+          style={styles.accountHero}
+        >
           <View style={styles.accountHeroIcon}><UserRound size={30} color="#FFFFFF" /></View>
           <View style={styles.accountHeroCopy}><AppText style={styles.accountTitle}>حساب کاربری</AppText><AppText style={styles.accountSubtitle}>اطلاعاتت فقط برای تجربه بهتر و تسویه دنگ‌ها استفاده می‌شود.</AppText></View>
-        </View>
+        </Pressable>
+        {adPanelOpen && (
+          <View style={styles.adPanel}>
+            <View style={styles.adPanelHead}>
+              <Pressable accessibilityRole="button" accessibilityLabel="بستن" onPress={() => setAdPanelOpen(false)}><X size={17} color={C.muted} /></Pressable>
+              <AppText style={styles.adPanelTitle}>وضعیت تبلیغ‌ها</AppText>
+            </View>
+            {adInfo ? (
+              <>
+                <AppText style={styles.adPanelRow}>ماژول تپسل: {adInfo.moduleLinked ? 'متصل ✓' : 'متصل نیست ✗'}</AppText>
+                <AppText style={styles.adPanelRow}>
+                  اینترستیشیال: {adInfo.interstitial.ready ? 'آماده ✓' : adInfo.interstitial.requesting ? 'در حال درخواست…' : 'خالی'}
+                </AppText>
+                {adInfo.interstitial.lastError ? <AppText style={styles.adPanelError} selectable>{adInfo.interstitial.lastError}</AppText> : null}
+                <AppText style={styles.adPanelRow}>
+                  بنر: {adInfo.banner.visible ? 'روی صفحه ✓' : adInfo.banner.requesting ? 'در حال درخواست…' : adInfo.banner.wanted ? 'درخواست‌شده، هنوز نیامده' : 'غیرفعال'}
+                </AppText>
+                {adInfo.banner.lastError ? <AppText style={styles.adPanelError} selectable>{adInfo.banner.lastError}</AppText> : null}
+                {!adInfo.interstitial.lastError && !adInfo.banner.lastError && (
+                  <AppText style={styles.adPanelHint}>تا این لحظه خطایی ثبت نشده.</AppText>
+                )}
+              </>
+            ) : <AppText style={styles.adPanelHint}>در حال خواندن…</AppText>}
+            <Pressable accessibilityRole="button" onPress={() => { retryAds(); showToast('درخواست تبلیغ دوباره فرستاده شد'); }} style={styles.adPanelButton}>
+              <AppText style={styles.adPanelButtonText}>تلاش دوباره</AppText>
+            </Pressable>
+            <AppText style={styles.adPanelHint}>این پنل فقط برای عیب‌یابی است. اگر خطایی اینجا بود، همان متن را برای پشتیبانی بفرست.</AppText>
+          </View>
+        )}
         {accountLoading ? <View style={styles.accountCard}><AppText style={styles.accountHint}>اطلاعات حساب در حال بارگذاری است…</AppText></View> : <View style={styles.accountCard}>
           <AppText style={styles.accountSectionTitle}>اطلاعات من</AppText>
           <AppText style={styles.accountLabel}>نام و نام خانوادگی <AppText style={styles.requiredMark}>*</AppText></AppText>
@@ -1464,6 +1515,9 @@ function DongoApp() {
           <Pressable accessibilityRole="button" disabled={accountSaving} onPress={() => void saveAccount()} style={({ pressed }) => [styles.accountSaveButton, pressed && styles.pressed, accountSaving && styles.saveButtonDisabled]}><AppText style={styles.accountSaveText}>{accountSaving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}</AppText></Pressable>
         </View>}
         <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => void signOut()} style={({ pressed }) => [styles.accountLogoutButton, pressed && styles.pressed, cloudBusy && { opacity: 0.65 }]}><LogOut size={18} color={C.debt} /><AppText style={styles.accountLogoutText}>خروج از حساب کاربری</AppText></Pressable>
+        <Pressable accessibilityRole="button" onPress={() => setAdPanelOpen((open) => !open)} style={styles.adPanelToggle}>
+          <AppText style={styles.adPanelToggleText}>{adPanelOpen ? 'بستن وضعیت فنی تبلیغ‌ها' : 'وضعیت فنی تبلیغ‌ها'}</AppText>
+        </Pressable>
       </View>
     );
   }
@@ -2602,6 +2656,16 @@ const styles = StyleSheet.create({
   newStoryFromSwitcher: { minHeight: 55, borderRadius: 18, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 15 },
   newStoryFromSwitcherText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 12 },
   accountPage: { gap: 14 },
+  adPanelToggle: { minHeight: 38, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  adPanelToggleText: { fontFamily: F.medium, fontSize: 10, color: C.faint },
+  adPanel: { marginTop: 12, borderRadius: 18, borderWidth: 1, borderColor: C.line, backgroundColor: C.paper, padding: 14 },
+  adPanelHead: { flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', marginBottom: 9 },
+  adPanelTitle: { fontFamily: F.extra, fontSize: 12 },
+  adPanelRow: { fontFamily: F.medium, fontSize: 11, color: C.ink, textAlign: 'right', lineHeight: 20 },
+  adPanelError: { fontFamily: F.regular, fontSize: 10, color: C.debt, textAlign: 'left', writingDirection: 'ltr', lineHeight: 17, backgroundColor: C.debtPale, borderRadius: 10, padding: 8, marginTop: 4, marginBottom: 4 },
+  adPanelHint: { fontFamily: F.medium, fontSize: 9, color: C.faint, textAlign: 'right', lineHeight: 16, marginTop: 6 },
+  adPanelButton: { minHeight: 40, borderRadius: 12, backgroundColor: C.purplePale, alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  adPanelButtonText: { fontFamily: F.bold, fontSize: 11, color: C.purpleDark },
   accountHero: { minHeight: 128, borderRadius: 27, backgroundColor: C.purple, padding: 19, flexDirection: 'row-reverse', alignItems: 'center', gap: 13 },
   accountHeroIcon: { width: 64, height: 64, borderRadius: 23, backgroundColor: 'rgba(255,255,255,0.18)', alignItems: 'center', justifyContent: 'center' },
   accountHeroCopy: { flex: 1, alignItems: 'flex-end' },

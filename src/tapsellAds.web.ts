@@ -20,6 +20,14 @@ export function setBannerVisibilityListener(_listener: ((visible: boolean) => vo
   // no-op
 }
 
-export function getAdDiagnostics(): Partial<Record<'interstitial' | 'banner', string>> {
-  return {};
+export function getAdDiagnostics() {
+  return {
+    moduleLinked: false,
+    interstitial: { ready: false, requesting: false, lastError: 'روی وب تبلیغی وجود ندارد' },
+    banner: { wanted: false, visible: false, requesting: false, lastError: 'روی وب تبلیغی وجود ندارد' },
+  };
+}
+
+export function retryAds() {
+  // no-op
 }
