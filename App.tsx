@@ -42,6 +42,7 @@ import {
   type Transfer,
 } from './src/settlement';
 import { AuthGate } from './src/AuthGate';
+import { friendlyError } from './src/errors';
 import { displayablePhone, toIranPhone, toLatinDigits } from './src/phone';
 import { supabase } from './src/supabase';
 import {
@@ -514,7 +515,7 @@ function DongoApp() {
         setPayments([]);
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'همگام‌سازی ماجراها ناموفق بود';
+      const message = friendlyError(error, 'همگام‌سازی ماجراها ناموفق بود');
       setStoriesError(message);
       showToast(message);
     } finally {
@@ -898,7 +899,7 @@ function DongoApp() {
       showToast('خرج حذف شد و دنگ‌ها دوباره محاسبه شدند');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'حذف خرج ناموفق بود');
+      showToast(friendlyError(error, 'حذف خرج ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1038,7 +1039,7 @@ function DongoApp() {
         ? `ماجرا ساخته شد، ولی ${failed.join('، ')} اضافه نشد؛ از «افزودن نفر» دوباره امتحان کن.`
         : 'ماجرای آنلاین جدیدت آماده‌ست');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'ساخت ماجرا ناموفق بود');
+      showToast(friendlyError(error, 'ساخت ماجرا ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1073,7 +1074,7 @@ function DongoApp() {
       showToast(`ماجرای «${storyName}» با موفقیت تمام شد`);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'اتمام ماجرا ناموفق بود');
+      showToast(friendlyError(error, 'اتمام ماجرا ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1122,7 +1123,7 @@ function DongoApp() {
       showToast('پرداخت آنلاین ثبت شد و مانده‌حساب‌ها به‌روز شدند');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'ثبت پرداخت ناموفق بود');
+      showToast(friendlyError(error, 'ثبت پرداخت ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1213,7 +1214,7 @@ function DongoApp() {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       void showExpenseInterstitial();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'ثبت خرج ناموفق بود');
+      showToast(friendlyError(error, 'ثبت خرج ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1256,7 +1257,7 @@ function DongoApp() {
       setMemberModal(false);
       showToast(`${name} به‌عنوان عضو بدون اپ اضافه شد`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'افزودن عضو ناموفق بود');
+      showToast(friendlyError(error, 'افزودن عضو ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1334,7 +1335,7 @@ function DongoApp() {
       setEditingMember(null);
       showToast('اطلاعات عضو ویرایش شد');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'ویرایش عضو ناموفق بود');
+      showToast(friendlyError(error, 'ویرایش عضو ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1358,7 +1359,7 @@ function DongoApp() {
       setTab('home');
       showToast(`ماجرای «${deletedName}» حذف شد`);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'حذف ماجرا ناموفق بود');
+      showToast(friendlyError(error, 'حذف ماجرا ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1388,7 +1389,7 @@ function DongoApp() {
       setJoinModal(false);
       showToast('با موفقیت به ماجرا پیوستی');
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'کد دعوت معتبر نیست');
+      showToast(friendlyError(error, 'کد دعوت معتبر نیست'));
     } finally {
       setCloudBusy(false);
     }
@@ -2119,7 +2120,7 @@ function DongoApp() {
           <View style={styles.brandCopy}><AppText style={styles.brandName}>دنگودونگ</AppText><AppText style={styles.brandTagline}>خرج کن، راحت تسویه کن</AppText></View>
           <View style={styles.brandMark}><WalletCards size={23} color="#FFFFFF" /></View>
         </View>
-        {storiesLoading ? <View style={styles.storiesLoading}><AppText style={styles.welcomeTitle}>ماجراها در حال بارگذاری‌اند…</AppText><AppText style={styles.welcomeText}>چند لحظه صبر کن تا اطلاعات حسابت دریافت شود.</AppText></View> : storiesError ? <View style={styles.storiesLoading}><View style={styles.deleteDialogIcon}><AlertTriangle size={27} color={C.debt} /></View><AppText style={styles.welcomeTitle}>دریافت ماجراها ناموفق بود</AppText><AppText style={styles.welcomeText}>{storiesError}</AppText><Pressable accessibilityRole="button" style={styles.primaryStoryButton} onPress={() => void syncFromCloud()}><AppText style={styles.primaryStoryButtonText}>تلاش دوباره</AppText></Pressable></View> : <ScrollView contentContainerStyle={styles.welcomeContent} showsVerticalScrollIndicator={false}>
+        {storiesLoading ? <View style={styles.storiesLoading}><AppText style={styles.welcomeTitle}>ماجراها در حال بارگذاری‌اند…</AppText><AppText style={styles.welcomeText}>چند لحظه صبر کن تا اطلاعات حسابت دریافت شود.</AppText></View> : storiesError ? <View style={styles.storiesLoading}><View style={styles.deleteDialogIcon}><AlertTriangle size={27} color={C.debt} /></View><AppText style={styles.welcomeTitle}>اطلاعاتت دریافت نشد</AppText><AppText style={styles.welcomeText}>{storiesError}</AppText><Pressable accessibilityRole="button" style={styles.primaryStoryButton} onPress={() => void syncFromCloud()}><AppText style={styles.primaryStoryButtonText}>تلاش دوباره</AppText></Pressable></View> : <ScrollView contentContainerStyle={styles.welcomeContent} showsVerticalScrollIndicator={false}>
           <View style={styles.welcomeVisual}>
             <View style={styles.welcomeGlow} />
             <Image source={require('./assets/dong-mascot-optimized.png')} style={styles.welcomeMascot} resizeMode="contain" />
