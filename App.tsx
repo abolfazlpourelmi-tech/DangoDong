@@ -1696,7 +1696,11 @@ function DongoApp() {
       <>
         <View style={styles.dashboardHero}>
           <View style={styles.dashboardHeroIcon}><WalletCards size={27} color={C.purple} /></View>
-          <View style={styles.dashboardHeroCopy}><AppText style={styles.dashboardEyebrow}>ماجراهای من</AppText><AppText style={styles.dashboardTitle}>{faNumber.format(ongoing.length)} ماجرای در جریان</AppText><AppText style={styles.dashboardText}>یکی را باز کن تا خرج‌ها و حسابش را ببینی.</AppText></View>
+          <View style={styles.dashboardHeroCopy}><AppText style={styles.dashboardEyebrow}>ماجراهای من</AppText><AppText style={styles.dashboardTitle}>{ongoing.length
+              ? `${faNumber.format(ongoing.length)} ماجرای در جریان`
+              : completed.length ? 'همه ماجراهایت تمام شده' : 'هنوز ماجرایی نداری'}</AppText><AppText style={styles.dashboardText}>{ongoing.length
+              ? 'یکی را باز کن تا خرج‌ها و حسابش را ببینی.'
+              : 'هر وقت خرج مشترک تازه‌ای داشتی، یک ماجرای جدید بساز.'}</AppText></View>
         </View>
         <View style={styles.dashboardActions}>
           <Pressable accessibilityRole="button" onPress={openNewStory} style={styles.dashboardNewStory}><Plus size={19} color="#FFFFFF" /><AppText style={styles.dashboardNewStoryText}>ساخت ماجرای جدید</AppText></Pressable>
@@ -1928,11 +1932,11 @@ function DongoApp() {
                 <View style={styles.memberCardCopy}>
                   <View style={styles.nameRow}>
                     {(canManageGuests || member.isMe) && !storyCompleted && <Pencil size={12} color={C.faint} />}
-                    {member.isMe && <View style={styles.meBadge}><AppText style={styles.meText}>من</AppText></View>}
+                    {member.isMe && member.name.trim() !== 'من' && <View style={styles.meBadge}><AppText style={styles.meText}>من</AppText></View>}
                     <AppText style={styles.memberCardName}>{member.name}</AppText>
                   </View>
                   <AppText style={[styles.memberBalance, { color: balance === 0 ? C.muted : balance > 0 ? C.mintDark : C.debt }]}>
-                    {balance === 0 ? 'حسابش صاف است' : `${balance > 0 ? 'طلبکار' : 'بدهکار'} · ${faNumber.format(Math.abs(balance))}`}
+                    {balance === 0 ? (member.isMe ? 'حسابت صاف است' : 'حسابش صاف است') : `${balance > 0 ? 'طلبکار' : 'بدهکار'} · ${faNumber.format(Math.abs(balance))}`}
                   </AppText>
                   {/* "۱ سهم" on a one-person account is accounting vocabulary with
                       nothing to say. It only means something above one. */}
@@ -2097,7 +2101,7 @@ function DongoApp() {
                       The words say the same thing without needing to be taught. */}
                   <AppText style={[styles.balancePillValue, { color: positive ? C.mintDark : C.debt }]}>
                     {balance.amount === 0
-                      ? 'حسابش صاف است'
+                      ? (member?.isMe ? 'حسابت صاف است' : 'حسابش صاف است')
                       : `${faNumber.format(Math.abs(balance.amount))} ${positive ? 'طلبکار' : 'بدهکار'}`}
                   </AppText>
                 </View>
