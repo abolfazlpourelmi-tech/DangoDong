@@ -85,7 +85,6 @@ const {
   ChevronLeft,
   HandCoins,
   Home,
-  MoreHorizontal,
   Pencil,
   PartyPopper,
   Plus,
@@ -884,7 +883,7 @@ function DongoApp() {
       setExpenses((current) => current.filter((item) => item.id !== expense.id));
       setDeleteExpenseTarget(null);
       setExpenseDetailsModal(false);
-      showToast('هزینه آزمایشی حذف شد.');
+      showToast('خرج آزمایشی حذف شد.');
       return;
     }
     setCloudBusy(true);
@@ -893,10 +892,10 @@ function DongoApp() {
       await syncFromCloud(storyId);
       setDeleteExpenseTarget(null);
       setExpenseDetailsModal(false);
-      showToast('هزینه حذف شد و دنگ‌ها دوباره محاسبه شدند');
+      showToast('خرج حذف شد و دنگ‌ها دوباره محاسبه شدند');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'حذف هزینه ناموفق بود');
+      showToast(error instanceof Error ? error.message : 'حذف خرج ناموفق بود');
     } finally {
       setCloudBusy(false);
     }
@@ -1188,7 +1187,7 @@ function DongoApp() {
       setEditingExpense(null);
       setExpenseModal(false);
       setTab('home');
-      showToast(editingExpense ? 'هزینه آزمایشی ویرایش شد.' : 'هزینه آزمایشی با اعضای انتخاب‌شده ثبت شد.');
+      showToast(editingExpense ? 'خرج آزمایشی ویرایش شد.' : 'هزینه آزمایشی با اعضای انتخاب‌شده ثبت شد.');
       return;
     }
     setCloudBusy(true);
@@ -1199,7 +1198,7 @@ function DongoApp() {
         setEditingExpense(null);
         setExpenseModal(false);
         setTab('home');
-        showToast('هزینه ویرایش شد و دنگ‌ها دوباره محاسبه شدند');
+        showToast('خرج ویرایش شد و دنگ‌ها دوباره محاسبه شدند');
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         return;
       }
@@ -1211,7 +1210,7 @@ function DongoApp() {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       void showExpenseInterstitial();
     } catch (error) {
-      showToast(error instanceof Error ? error.message : 'ثبت هزینه ناموفق بود');
+      showToast(error instanceof Error ? error.message : 'ثبت خرج ناموفق بود');
     } finally {
       setCloudBusy(false);
     }
@@ -1831,7 +1830,7 @@ function DongoApp() {
           <View style={[styles.statCard, { backgroundColor: C.yellowPale }]}>
             <View style={[styles.statIcon, { backgroundColor: C.yellow }]}><ReceiptText size={20} color={C.ink} /></View>
             <View style={styles.statCopy}>
-              <AppText style={styles.statLabel}>کل هزینه ماجرا</AppText>
+              <AppText style={styles.statLabel}>کل خرج ماجرا</AppText>
               <AppText style={styles.statValue}>{formatMoney(total)}</AppText>
             </View>
           </View>
@@ -1870,8 +1869,8 @@ function DongoApp() {
                     {member.isMe && <View style={styles.meBadge}><AppText style={styles.meText}>من</AppText></View>}
                     <AppText style={styles.memberCardName}>{member.name}</AppText>
                   </View>
-                  <AppText style={[styles.memberBalance, { color: balance >= 0 ? C.mintDark : C.debt }]}>
-                    {balance >= 0 ? 'طلبکار' : 'بدهکار'} · {faNumber.format(Math.abs(balance))}
+                  <AppText style={[styles.memberBalance, { color: balance === 0 ? C.muted : balance > 0 ? C.mintDark : C.debt }]}>
+                    {balance === 0 ? 'حسابش صاف است' : `${balance > 0 ? 'طلبکار' : 'بدهکار'} · ${faNumber.format(Math.abs(balance))}`}
                   </AppText>
                   {/* "۱ سهم" on a one-person account is accounting vocabulary with
                       nothing to say. It only means something above one. */}
@@ -1898,14 +1897,14 @@ function DongoApp() {
           <Pressable accessibilityRole="button" onPress={() => setTab('expenses')}>
             <AppText style={styles.seeAll}>دیدن همه</AppText>
           </Pressable>
-          <AppText style={styles.sectionTitle}>آخرین هزینه‌ها</AppText>
+          <AppText style={styles.sectionTitle}>آخرین خرج‌ها</AppText>
         </View>
         <View style={styles.expenseList}>
           {expenses.length ? expenses.slice(0, 3).map(renderExpense) : (
             <View style={styles.inlineEmpty}>
-              <AppText style={styles.inlineEmptyTitle}>هنوز هزینه‌ای ثبت نشده</AppText>
-              <AppText style={styles.inlineEmptyText}>{storyCompleted ? 'این ماجرا بدون هزینه ثبت‌شده به پایان رسیده است.' : 'اولین هزینه را ثبت کن تا دنگ‌ها محاسبه شوند.'}</AppText>
-              {!storyCompleted && <Pressable accessibilityRole="button" style={styles.inlineEmptyButton} onPress={openExpenseModal}><Plus size={17} color="#FFFFFF" /><AppText style={styles.inlineEmptyButtonText}>ثبت اولین هزینه</AppText></Pressable>}
+              <AppText style={styles.inlineEmptyTitle}>هنوز خرجی ثبت نشده</AppText>
+              <AppText style={styles.inlineEmptyText}>{storyCompleted ? 'این ماجرا بدون هیچ خرجی به پایان رسیده است.' : 'اولین خرج را ثبت کن تا دنگ‌ها محاسبه شوند.'}</AppText>
+              {!storyCompleted && <Pressable accessibilityRole="button" style={styles.inlineEmptyButton} onPress={openExpenseModal}><Plus size={17} color="#FFFFFF" /><AppText style={styles.inlineEmptyButtonText}>ثبت اولین خرج</AppText></Pressable>}
             </View>
           )}
         </View>
@@ -1914,7 +1913,7 @@ function DongoApp() {
         ) : (
           <Pressable accessibilityRole="button" onPress={() => setFinishModal(true)} style={styles.finishStoryButton}><Check size={19} color={C.mintDark} /><View style={styles.finishStoryCopy}><AppText style={styles.finishStoryTitle}>اتمام ماجرا</AppText><AppText style={styles.finishStoryText}>وقتی همه خرج‌ها ثبت شد و همه تسویه کردند، ماجرا را ببند.</AppText></View></Pressable>
         )}
-        {canManageGuests && <Pressable accessibilityRole="button" onPress={() => setDeleteStoryModal(true)} style={styles.deleteStoryButton}><Trash2 size={18} color={C.debt} /><View style={styles.finishStoryCopy}><AppText style={styles.deleteStoryTitle}>حذف ماجرا</AppText><AppText style={styles.finishStoryText}>همه هزینه‌ها، اعضا و تسویه‌های این ماجرا حذف می‌شوند.</AppText></View></Pressable>}
+        {canManageGuests && <Pressable accessibilityRole="button" onPress={() => setDeleteStoryModal(true)} style={styles.deleteStoryButton}><Trash2 size={18} color={C.debt} /><View style={styles.finishStoryCopy}><AppText style={styles.deleteStoryTitle}>حذف ماجرا</AppText><AppText style={styles.finishStoryText}>همه خرج‌ها، اعضا و تسویه‌های این ماجرا حذف می‌شوند.</AppText></View></Pressable>}
       </>
     );
   }
@@ -1949,7 +1948,7 @@ function DongoApp() {
           <View style={styles.inlineEmpty}><AppText style={styles.inlineEmptyTitle}>{expenseFilter === 'all' ? 'هنوز خرجی ثبت نشده' : 'اینجا چیزی نیست'}</AppText><AppText style={styles.inlineEmptyText}>{expenseFilter === 'mine'
             ? 'هنوز پرداختی با حساب تو ثبت نشده.'
             : expenseFilter === 'week'
-              ? 'در هفت روز گذشته هزینه‌ای ثبت نشده؛ فیلتر «همه» را ببین.'
+              ? 'در هفت روز گذشته خرجی ثبت نشده؛ فیلتر «همه» را ببین.'
               : 'با دکمه «خرج جدید» شروع کن.'}</AppText></View>
         )}</View>
       </>
@@ -2194,17 +2193,31 @@ function DongoApp() {
   return (
     <View style={[styles.safeArea, { paddingTop: insets.top }]}>
       <StatusBar style="dark" />
+      {/* The back arrow and the bell used to share one slot, so the only way
+          into notifications disappeared on most screens. The bell has its own
+          corner now, and the empty view keeps the title centred without it. */}
       <View style={styles.topBar}>
         {canGoBackInApp ? (
           <Pressable accessibilityRole="button" accessibilityLabel="بازگشت به صفحه قبل" onPress={goBackInApp} style={styles.iconButton}><ArrowRight size={21} color={C.ink} /></Pressable>
+        ) : <View style={styles.iconButtonPlaceholder} />}
+        {storiesHome ? (
+          <View style={styles.brand}>
+            <View style={styles.brandCopy}><AppText style={styles.brandName}>دنگودونگ</AppText><AppText style={styles.brandTagline}>خرج کن، راحت تسویه کن</AppText></View>
+            <View style={styles.brandMark}><WalletCards size={23} color="#FFFFFF" /></View>
+          </View>
         ) : (
-          <Pressable accessibilityRole="button" accessibilityLabel={`اعلان‌ها، ${faNumber.format(notificationItems.length)} مورد`} onPress={() => setNotificationsModal(true)} style={styles.iconButton}><Bell size={21} color={C.ink} />{notificationItems.length > 0 && <View style={styles.notificationBadge}><AppText style={styles.notificationBadgeText}>{faNumber.format(notificationItems.length)}</AppText></View>}</Pressable>
+          /* The brand tagline sat here on every screen. The name of the outing
+             you are looking at is more use, and doubles as the switcher that
+             used to hide behind an unlabelled "..." icon. */
+          <Pressable accessibilityRole="button" accessibilityLabel="تعویض ماجرا" onPress={() => setStorySwitcher(true)} style={({ pressed }) => [styles.brand, pressed && styles.pressed]}>
+            <View style={styles.brandCopy}>
+              <AppText numberOfLines={1} style={styles.headerStoryName}>{storyName}</AppText>
+              <AppText style={styles.brandTagline}>تعویض ماجرا</AppText>
+            </View>
+            <View style={styles.brandMark}><WalletCards size={23} color="#FFFFFF" /></View>
+          </Pressable>
         )}
-        <View style={styles.brand}>
-          <View style={styles.brandCopy}><AppText style={styles.brandName}>دنگودونگ</AppText><AppText style={styles.brandTagline}>خرج کن، راحت تسویه کن</AppText></View>
-          <View style={styles.brandMark}><WalletCards size={23} color="#FFFFFF" /></View>
-        </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="تعویض یا ساخت ماجرا" onPress={() => setStorySwitcher(true)} style={styles.iconButton}><MoreHorizontal size={22} color={C.ink} /></Pressable>
+        <Pressable accessibilityRole="button" accessibilityLabel={`اعلان‌ها، ${faNumber.format(notificationItems.length)} مورد`} onPress={() => setNotificationsModal(true)} style={styles.iconButton}><Bell size={21} color={C.ink} />{notificationItems.length > 0 && <View style={styles.notificationBadge}><AppText style={styles.notificationBadgeText}>{faNumber.format(notificationItems.length)}</AppText></View>}</Pressable>
       </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -2230,9 +2243,9 @@ function DongoApp() {
       {/* The nav floats above the content, so with the keyboard up it would
           otherwise hover over the keyboard and cover the field being typed in. */}
       {!keyboardVisible && <View style={[styles.bottomNav, { bottom: insets.bottom + 10 }]}>
-        <Pressable accessibilityRole="tab" accessibilityState={{ selected: storiesHome }} onPress={() => { setStoriesHome(true); setTab('home'); }} style={styles.navItem}>
-          <View style={[styles.navIconWrap, storiesHome && styles.navIconWrapActive]}><Home size={21} color={storiesHome ? C.purple : C.faint} fill={storiesHome ? C.purplePale : 'transparent'} /></View>
-          <AppText style={[styles.navLabel, storiesHome && styles.navLabelActive]}>ماجراها</AppText>
+        <Pressable accessibilityRole="tab" accessibilityState={{ selected: !storiesHome && tab === 'home' }} onPress={() => { setStoriesHome(false); setTab('home'); }} style={styles.navItem}>
+          <View style={[styles.navIconWrap, !storiesHome && tab === 'home' && styles.navIconWrapActive]}><Home size={21} color={!storiesHome && tab === 'home' ? C.purple : C.faint} fill={!storiesHome && tab === 'home' ? C.purplePale : 'transparent'} /></View>
+          <AppText style={[styles.navLabel, !storiesHome && tab === 'home' && styles.navLabelActive]}>خانه</AppText>
         </Pressable>
         <Pressable accessibilityRole="tab" accessibilityState={{ selected: !storiesHome && tab === 'expenses' }} onPress={() => { setStoriesHome(false); setTab('expenses'); }} style={styles.navItem}>
           <View style={[styles.navIconWrap, tab === 'expenses' && styles.navIconWrapActive]}><ReceiptText size={21} color={tab === 'expenses' ? C.purple : C.faint} /></View>
@@ -2310,8 +2323,8 @@ function DongoApp() {
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.expenseDetailsCard} accessibilityViewIsModal>
             <View style={styles.switcherHeader}>
-              <Pressable accessibilityRole="button" accessibilityLabel="بستن جزئیات هزینه" style={styles.sheetClose} onPress={() => setExpenseDetailsModal(false)}><X size={20} color={C.ink} /></Pressable>
-              <View style={styles.switcherHeaderCopy}><AppText style={styles.dialogTitle}>{selectedExpense?.title ?? 'جزئیات هزینه'}</AppText><AppText style={styles.dialogTextCompact}>{selectedExpense ? `${memberById(selectedExpense.payerId)?.name ?? ''} پرداخت کرد · ${selectedExpense.createdAt}` : ''}</AppText></View>
+              <Pressable accessibilityRole="button" accessibilityLabel="بستن جزئیات خرج" style={styles.sheetClose} onPress={() => setExpenseDetailsModal(false)}><X size={20} color={C.ink} /></Pressable>
+              <View style={styles.switcherHeaderCopy}><AppText style={styles.dialogTitle}>{selectedExpense?.title ?? 'جزئیات خرج'}</AppText><AppText style={styles.dialogTextCompact}>{selectedExpense ? `${memberById(selectedExpense.payerId)?.name ?? ''} پرداخت کرد · ${selectedExpense.createdAt}` : ''}</AppText></View>
               <CategoryBadge category={selectedExpense?.category} size={45} />
             </View>
             {selectedExpense && <>
@@ -2327,7 +2340,7 @@ function DongoApp() {
                 <View style={styles.expenseAuthorIcon}><UserRound size={15} color={C.purple} /></View>
                 <AppText style={styles.expenseAuthorText}>{selectedExpense.createdById
                   ? `ثبت‌شده توسط ${expenseAuthorName(selectedExpense)}`
-                  : 'ثبت‌کننده این هزینه مشخص نیست'}</AppText>
+                  : 'معلوم نیست این خرج را چه کسی ثبت کرده'}</AppText>
               </View>
               {canEditExpense(selectedExpense) ? (
                 <View style={styles.expenseOwnerActions}>
@@ -2335,7 +2348,7 @@ function DongoApp() {
                   <Pressable accessibilityRole="button" disabled={cloudBusy} style={[styles.expenseEditButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => openExpenseEditor(selectedExpense)}><Pencil size={17} color="#FFFFFF" /><AppText style={styles.expenseEditText}>ویرایش</AppText></Pressable>
                 </View>
               ) : selectedExpense.createdById ? (
-                <AppText style={styles.expenseOwnerHint}>فقط {expenseAuthorName(selectedExpense)} می‌تواند این هزینه را ویرایش یا حذف کند.</AppText>
+                <AppText style={styles.expenseOwnerHint}>فقط {expenseAuthorName(selectedExpense)} می‌تواند این خرج را ویرایش یا حذف کند.</AppText>
               ) : null}
               <Pressable accessibilityRole="button" style={styles.expenseDetailsCloseButton} onPress={() => setExpenseDetailsModal(false)}><AppText style={styles.expenseDetailsCloseText}>بستن</AppText></Pressable>
             </>}
@@ -2372,7 +2385,7 @@ function DongoApp() {
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.finishDialogIcon}><Check size={29} color={C.mintDark} /></View>
             <AppText style={styles.dialogTitle}>ماجرا تموم شد؟</AppText>
-            <AppText style={styles.finishDialogText}>بعد از اتمام، «{storyName}» به بخش ماجراهای تمام‌شده می‌رود و هزینه جدیدی به آن اضافه نمی‌شود.</AppText>
+            <AppText style={styles.finishDialogText}>بعد از اتمام، «{storyName}» به بخش ماجراهای تمام‌شده می‌رود و خرج جدیدی به آن اضافه نمی‌شود.</AppText>
             <View style={styles.finishSummaryRow}>
               <View style={styles.finishSummaryItem}><AppText style={styles.finishSummaryLabel}>کل خرج</AppText><AppText style={styles.finishSummaryValue}>{formatMoney(total)}</AppText></View>
               <View style={styles.finishSummaryDivider} />
@@ -2392,7 +2405,7 @@ function DongoApp() {
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.deleteDialogIcon}><AlertTriangle size={29} color={C.debt} /></View>
             <AppText style={styles.dialogTitle}>این ماجرا حذف شود؟</AppText>
-            <AppText style={styles.finishDialogText}>با حذف «{storyName}»، همه اعضا، هزینه‌ها و تسویه‌های آن برای همیشه پاک می‌شوند و قابل بازیابی نیستند.</AppText>
+            <AppText style={styles.finishDialogText}>با حذف «{storyName}»، همه اعضا، خرج‌ها و تسویه‌های آن برای همیشه پاک می‌شوند و قابل بازیابی نیستند.</AppText>
             <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>این عملیات برگشت‌پذیر نیست.</AppText></View>
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setDeleteStoryModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
@@ -2406,7 +2419,7 @@ function DongoApp() {
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.deleteDialogIcon}><AlertTriangle size={29} color={C.debt} /></View>
-            <AppText style={styles.dialogTitle}>این هزینه حذف شود؟</AppText>
+            <AppText style={styles.dialogTitle}>این خرج حذف شود؟</AppText>
             <AppText style={styles.finishDialogText}>
               {deleteExpenseTarget
                 ? `«${deleteExpenseTarget.title}» به مبلغ ${formatMoney(deleteExpenseTarget.amount)} حذف می‌شود و دنگ همه اعضا دوباره محاسبه خواهد شد.`
@@ -2473,7 +2486,7 @@ function DongoApp() {
                 <View style={styles.amountInputRow}>
                   <AppText style={styles.amountUnit}>تومان</AppText>
                   <TextInput
-                    accessibilityLabel="مبلغ هزینه به تومان"
+                    accessibilityLabel="مبلغ خرج به تومان"
                     style={styles.amountInput}
                     value={amount ? faNumber.format(Number(amount)) : ''}
                     onChangeText={(value) => setAmount(normalizeDigits(value).replace(/^0+/, '').slice(0, MAX_AMOUNT_DIGITS))}
@@ -2662,6 +2675,8 @@ const styles = StyleSheet.create({
   loading: { flex: 1, backgroundColor: C.canvas },
   safeArea: { flex: 1, backgroundColor: C.canvas },
   topBar: { height: 72, paddingHorizontal: 18, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between', backgroundColor: C.canvas },
+  iconButtonPlaceholder: { width: 44, height: 44 },
+  headerStoryName: { fontFamily: F.black, fontSize: 17, lineHeight: 26, maxWidth: 168, textAlign: 'right' },
   iconButton: { width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center', backgroundColor: C.paper, borderWidth: 1, borderColor: C.line },
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   brandCopy: { alignItems: 'flex-end' },
