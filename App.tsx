@@ -379,6 +379,9 @@ function DongoApp() {
   const [newMemberName, setNewMemberName] = useState('');
   const [newMemberUnits, setNewMemberUnits] = useState('1');
   const [newHouseholdNameInputs, setNewHouseholdNameInputs] = useState<string[]>([]);
+  // Adding one person is the common case; the household fields used to be part
+  // of the form whether or not anybody had a household.
+  const [newMemberFamilyOpen, setNewMemberFamilyOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [editMemberName, setEditMemberName] = useState('');
   const [editMemberUnits, setEditMemberUnits] = useState('1');
@@ -1270,6 +1273,7 @@ function DongoApp() {
     setNewMemberName('');
     setNewMemberUnits('1');
     setNewHouseholdNameInputs([]);
+    setNewMemberFamilyOpen(false);
     setMemberMode(canManageGuests ? 'guest' : 'invite');
     setMemberModal(true);
   }
@@ -1555,7 +1559,7 @@ function DongoApp() {
                   <AppText style={styles.formLabelNoMargin}>روی هم چند نفرید؟</AppText>
                   <AppText style={styles.formHelper}>با احتساب خودت؛ حداکثر ۱۲ نفر.</AppText>
                 </View>
-                <TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits} onChangeText={changeOwnerUnits} placeholder="۲" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" />
+                <TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits ? faNumber.format(Number(newOwnerUnits)) : ''} onChangeText={changeOwnerUnits} placeholder="۲" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" />
               </View>
               <View style={styles.familyInputsContent}>
                 {ownerFamilyNames.map((value, index) => (
@@ -1902,29 +1906,28 @@ function DongoApp() {
         <View style={styles.pageIntro}>
           <View style={styles.pageIcon}><ReceiptText size={26} color={C.purple} /></View>
           <View style={styles.pageIntroCopy}>
-            <AppText style={styles.pageTitle}>هزینه‌های ماجرا</AppText>
+            <AppText style={styles.pageTitle}>خرج‌های این ماجرا</AppText>
             <AppText style={styles.pageSubtitle}>{expenseFilter === 'all'
-              ? `${faNumber.format(expenses.length)} هزینه · جمعاً ${formatMoney(total)}`
-              : `${faNumber.format(filteredExpenses.length)} از ${faNumber.format(expenses.length)} هزینه · ${formatMoney(filteredTotal)}`}</AppText>
+              ? `${faNumber.format(expenses.length)} خرج · جمعاً ${formatMoney(total)}`
+              : `${faNumber.format(filteredExpenses.length)} از ${faNumber.format(expenses.length)} خرج · ${formatMoney(filteredTotal)}`}</AppText>
           </View>
         </View>
-        <View style={styles.filterRow}>
-          {([
-            { id: 'all', label: 'همه' },
-            { id: 'week', label: 'این هفته' },
-            { id: 'mine', label: 'پرداخت‌های من' },
-          ] as const).map((filter) => {
-            const active = expenseFilter === filter.id;
-            return <Pressable key={filter.id} accessibilityRole="button" accessibilityState={{ selected: active }} onPress={() => setExpenseFilter(filter.id)} style={[styles.filterChip, active && styles.filterChipActive]}><AppText style={active ? styles.filterChipActiveText : styles.filterChipText}>{filter.label}</AppText></Pressable>;
-          })}
-        </View>
-        <View style={styles.dateTitleRow}>
-          <View style={styles.dateLine} />
-          <AppText style={styles.dateTitle}>{expenseFilter === 'week' ? 'هفت روز گذشته' : 'فعالیت‌های اخیر'}</AppText>
-          <View style={styles.dateLine} />
-        </View>
+        {/* Filters over a list you can take in at a glance are three controls
+            that do nothing yet, and they arrive before the list itself. */}
+        {expenses.length > 4 && (
+          <View style={styles.filterRow}>
+            {([
+              { id: 'all', label: 'همه' },
+              { id: 'week', label: 'این هفته' },
+              { id: 'mine', label: 'پرداخت‌های من' },
+            ] as const).map((filter) => {
+              const active = expenseFilter === filter.id;
+              return <Pressable key={filter.id} accessibilityRole="button" accessibilityState={{ selected: active }} onPress={() => setExpenseFilter(filter.id)} style={[styles.filterChip, active && styles.filterChipActive]}><AppText style={active ? styles.filterChipActiveText : styles.filterChipText}>{filter.label}</AppText></Pressable>;
+            })}
+          </View>
+        )}
         <View style={styles.expenseList}>{filteredExpenses.length ? filteredExpenses.map(renderExpense) : (
-          <View style={styles.inlineEmpty}><AppText style={styles.inlineEmptyTitle}>هزینه‌ای در این فیلتر نیست</AppText><AppText style={styles.inlineEmptyText}>{expenseFilter === 'mine'
+          <View style={styles.inlineEmpty}><AppText style={styles.inlineEmptyTitle}>{expenseFilter === 'all' ? 'هنوز خرجی ثبت نشده' : 'اینجا چیزی نیست'}</AppText><AppText style={styles.inlineEmptyText}>{expenseFilter === 'mine'
             ? 'هنوز پرداختی با حساب تو ثبت نشده.'
             : expenseFilter === 'week'
               ? 'در هفت روز گذشته هزینه‌ای ثبت نشده؛ فیلتر «همه» را ببین.'
@@ -2147,7 +2150,7 @@ function DongoApp() {
               <AppText style={styles.dialogTitle}>پیوستن به ماجرا</AppText>
               <AppText style={styles.dialogText}>کدی را که سازنده ماجرا برایت فرستاده وارد کن.</AppText>
               <TextInput autoCapitalize="characters" autoCorrect={false} maxLength={8} style={[styles.formInput, styles.joinCodeInput]} value={joinCode} onChangeText={(value) => setJoinCode(value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())} placeholder="کد ۸ کاراکتری" placeholderTextColor={C.faint} textAlign="center" autoFocus />
-              <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب تو هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits} onChangeText={(value) => { const normalized = normalizeDigits(value).replace(/^0+/, '').slice(0, 2); const count = Math.min(12, Math.max(1, Number(normalized || 1))); setJoinUnits(normalized); setJoinHouseholdNameInputs((current) => Array.from({ length: count - 1 }, (_, index) => current[index] ?? '')); }} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+              <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب تو هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits ? faNumber.format(Number(joinUnits)) : ''} onChangeText={(value) => { const normalized = normalizeDigits(value).replace(/^0+/, '').slice(0, 2); const count = Math.min(12, Math.max(1, Number(normalized || 1))); setJoinUnits(normalized); setJoinHouseholdNameInputs((current) => Array.from({ length: count - 1 }, (_, index) => current[index] ?? '')); }} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
               {joinHouseholdNameInputs.map((value, index) => <View key={`join-home-${index}`} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setJoinHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
               <View style={styles.dialogActions}>
                 <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setJoinModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
@@ -2416,7 +2419,7 @@ function DongoApp() {
             <AppText style={styles.dialogTitle}>ویرایش عضو</AppText>
             <AppText style={styles.dialogText}>{editingMember?.kind === 'guest' ? 'نام حساب و تعداد نفرات نمایندگی‌شده را تغییر بده.' : 'نام این عضو از پروفایل خودش گرفته می‌شود؛ تعداد نفرات حساب را می‌توانی تغییر بدهی.'}</AppText>
             <TextInput editable={editingMember?.kind === 'guest'} style={[styles.formInput, editingMember?.kind !== 'guest' && styles.readonlyInput]} value={editMemberName} onChangeText={setEditMemberName} placeholder="نام عضو" placeholderTextColor={C.faint} textAlign="right" />
-            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>تعداد نفرات این حساب</AppText><AppText style={styles.formHelper}>مبنای تقسیم مساوی هزینه‌های بعدی؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={editMemberUnits} onChangeText={changeEditMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>تعداد نفرات این حساب</AppText><AppText style={styles.formHelper}>مبنای تقسیم مساوی هزینه‌های بعدی؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={editMemberUnits ? faNumber.format(Number(editMemberUnits)) : ''} onChangeText={changeEditMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
             {Number(editMemberUnits || 1) > 1 && <View style={styles.editFamilySection}><AppText style={styles.formLabelNoMargin}>اعضای این حساب</AppText><AppText style={styles.formHelper}>عضو ۱ سرپرست ثابت است؛ نام بقیه اعضا را جدا وارد کن.</AppText><View style={styles.editFamilyFixedRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.editFamilyFixedCopy}><AppText style={styles.familyInputLabel}>عضو ۱ · سرپرست</AppText><AppText style={styles.editFamilyFixedName}>{editingMember?.kind === 'guest' ? editMemberName || 'سرپرست حساب' : editingMember?.householdMembers?.[0] || accountName.trim() || editingMember?.name || 'من'}</AppText></View></View><View style={styles.editFamilyInputsContent}>{editHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setEditHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setEditMemberModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
@@ -2559,21 +2562,28 @@ function DongoApp() {
         <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Users size={26} color={C.purple} /></View>
-            <AppText style={styles.dialogTitle}>عضو جدید</AppText>
+            <AppText style={styles.dialogTitle}>یک نفر دیگر</AppText>
             <View style={styles.memberModeTabs}>
-              <Pressable disabled={!canManageGuests} onPress={() => setMemberMode('guest')} style={[styles.memberModeTab, memberMode === 'guest' && styles.memberModeTabActive, !canManageGuests && styles.memberModeTabDisabled]}><AppText style={memberMode === 'guest' ? styles.memberModeTabTextActive : styles.memberModeTabText}>عضو بدون اپ</AppText></Pressable>
-              <Pressable onPress={() => setMemberMode('invite')} style={[styles.memberModeTab, memberMode === 'invite' && styles.memberModeTabActive]}><AppText style={memberMode === 'invite' ? styles.memberModeTabTextActive : styles.memberModeTabText}>دعوت عضو اپ</AppText></Pressable>
+              <Pressable disabled={!canManageGuests} onPress={() => setMemberMode('guest')} style={[styles.memberModeTab, memberMode === 'guest' && styles.memberModeTabActive, !canManageGuests && styles.memberModeTabDisabled]}><AppText style={memberMode === 'guest' ? styles.memberModeTabTextActive : styles.memberModeTabText}>خودم اضافه می‌کنم</AppText></Pressable>
+              <Pressable onPress={() => setMemberMode('invite')} style={[styles.memberModeTab, memberMode === 'invite' && styles.memberModeTabActive]}><AppText style={memberMode === 'invite' ? styles.memberModeTabTextActive : styles.memberModeTabText}>دعوتش می‌کنم</AppText></Pressable>
             </View>
             {memberMode === 'guest' ? (
               <>
-                <AppText style={styles.dialogText}>برای فرد یا خانواده‌ای که اپ ندارد یک حساب نمایندگی بساز.</AppText>
-                <AppText style={styles.familyMemberLabel}>عضو ۱ · سرپرست حساب</AppText>
-                <TextInput accessibilityLabel="نام سرپرست حساب جدید" style={styles.formInput} value={newMemberName} onChangeText={setNewMemberName} placeholder="نام سرپرست خانواده" placeholderTextColor={C.faint} textAlign="right" autoFocus />
-                <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>تعداد نفرات این حساب</AppText><AppText style={styles.formHelper}>سرپرست هم جزو تعداد است؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={newMemberUnits} onChangeText={changeNewMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
-                {Number(newMemberUnits || 1) > 1 && <View style={styles.newMemberFamilySection}><AppText style={styles.formLabelNoMargin}>اعضای دیگر خانواده</AppText><AppText style={styles.formHelper}>برای عضو ۲، ۳ و… نام جداگانه وارد کن.</AppText><View style={styles.editFamilyInputsContent}>{newHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setNewHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
+                <AppText style={styles.dialogText}>اسم کسی که می‌خواهی به این ماجرا اضافه شود. لازم نیست اپ داشته باشد.</AppText>
+                <TextInput accessibilityLabel="اسم عضو جدید" style={styles.formInput} value={newMemberName} onChangeText={setNewMemberName} placeholder="مثلاً رضا" placeholderTextColor={C.faint} textAlign="right" autoFocus />
+                {newMemberFamilyOpen || Number(newMemberUnits || 1) > 1 ? (
+                  <>
+                    <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>روی هم چند نفرند؟</AppText><AppText style={styles.formHelper}>خودش هم جزو تعداد است؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={newMemberUnits ? faNumber.format(Number(newMemberUnits)) : ''} onChangeText={changeNewMemberUnits} placeholder="۲" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+                    {Number(newMemberUnits || 1) > 1 && <View style={styles.newMemberFamilySection}><AppText style={styles.formLabelNoMargin}>اسم بقیه</AppText><View style={styles.editFamilyInputsContent}>{newHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>نفر {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setNewHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`اسم نفر ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
+                  </>
+                ) : (
+                  <Pressable accessibilityRole="button" onPress={() => { setNewMemberFamilyOpen(true); changeNewMemberUnits('2'); }} style={styles.splitDisclosure}>
+                    <AppText style={styles.splitDisclosureText}>با خانواده‌اش می‌آید؟</AppText>
+                  </Pressable>
+                )}
                 <View style={styles.dialogActions}>
                   <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setMemberModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-                  <Pressable accessibilityRole="button" accessibilityState={{ disabled: newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy }} style={[styles.dialogAdd, (newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} disabled={newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} onPress={addMember}><Plus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>افزودن حساب</AppText></Pressable>
+                  <Pressable accessibilityRole="button" accessibilityState={{ disabled: newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy }} style={[styles.dialogAdd, (newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} disabled={newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} onPress={addMember}><Plus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>اضافه کن</AppText></Pressable>
                 </View>
               </>
             ) : (
@@ -2598,7 +2608,7 @@ function DongoApp() {
             <AppText style={styles.dialogTitle}>پیوستن به ماجرا</AppText>
             <AppText style={styles.dialogText}>کدی را که سازنده ماجرا برایت فرستاده وارد کن.</AppText>
             <TextInput autoCapitalize="characters" autoCorrect={false} maxLength={8} style={[styles.formInput, styles.joinCodeInput]} value={joinCode} onChangeText={(value) => setJoinCode(value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())} placeholder="کد ۸ کاراکتری" placeholderTextColor={C.faint} textAlign="center" autoFocus />
-            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب تو هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits} onChangeText={(value) => { const normalized = normalizeDigits(value).replace(/^0+/, '').slice(0, 2); const count = Math.min(12, Math.max(1, Number(normalized || 1))); setJoinUnits(normalized); setJoinHouseholdNameInputs((current) => Array.from({ length: count - 1 }, (_, index) => current[index] ?? '')); }} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب تو هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits ? faNumber.format(Number(joinUnits)) : ''} onChangeText={(value) => { const normalized = normalizeDigits(value).replace(/^0+/, '').slice(0, 2); const count = Math.min(12, Math.max(1, Number(normalized || 1))); setJoinUnits(normalized); setJoinHouseholdNameInputs((current) => Array.from({ length: count - 1 }, (_, index) => current[index] ?? '')); }} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
             {joinHouseholdNameInputs.map((value, index) => <View key={`join-story-${index}`} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setJoinHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setJoinModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>

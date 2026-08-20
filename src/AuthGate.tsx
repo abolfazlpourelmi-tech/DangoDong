@@ -215,12 +215,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.brand}><Text style={styles.brandLetter}>د</Text></View>
-        <Text style={styles.title}>{stage === 'profile' ? 'حساب دنگودونگ تو' : stage === 'welcome' ? 'شروع با دنگودونگ' : 'ورود به دنگودونگ'}</Text>
+        <Text style={styles.title}>{stage === 'profile' ? 'اسمت چیه؟' : stage === 'welcome' ? 'دنگودونگ' : 'ورود با شماره موبایل'}</Text>
         <Text style={styles.subtitle}>
-          {stage === 'welcome' && 'بدون واردکردن شماره شروع کن. برای بازیابی اطلاعات روی گوشی دیگر، بعداً می‌توانی شماره‌ات را ثبت کنی.'}
-          {stage === 'phone' && 'شماره موبایلت را وارد کن تا کد ورود برایت ارسال شود.'}
-          {stage === 'otp' && 'کد شش‌رقمی ارسال‌شده را وارد کن.'}
-          {stage === 'profile' && 'فقط نامت را وارد کن؛ این نام در ماجراهای مشترک به دیگران نمایش داده می‌شود.'}
+          {stage === 'welcome' && 'خرج‌های دوستانه را اینجا ثبت کن تا آخرش معلوم شود هر کس چقدر به چه کسی بدهکار است.'}
+          {stage === 'phone' && 'شماره موبایلت را وارد کن تا کد ورود برایت پیامک شود.'}
+          {stage === 'otp' && 'کد شش‌رقمی که پیامک شد را وارد کن.'}
+          {stage === 'profile' && 'همین اسم را بقیه در ماجراهای مشترک می‌بینند.'}
         </Text>
 
         {stage === 'welcome' && (
@@ -231,12 +231,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
               onPress={startWithoutPhone}
               style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, submitting && styles.buttonDisabled]}
             >
-              {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>شروع بدون شماره</Text>}
+              {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>شروع کنیم</Text>}
             </Pressable>
             <Pressable accessibilityRole="button" disabled={submitting} onPress={() => { setError(''); setStage('phone'); }} style={styles.secondaryButton}>
-              <Text style={styles.secondaryButtonText}>ورود یا بازیابی با شماره</Text>
+              <Text style={styles.secondaryButtonText}>قبلاً حساب داشتم</Text>
             </Pressable>
-            <Text style={styles.anonymousNotice}>بدون شماره هم همه‌چیز کار می‌کند، اما تا وقتی شماره‌ات را ثبت نکرده‌ای با حذف اپ یا خروج از حساب اطلاعاتت برنمی‌گردد. هر وقت خواستی از «حساب من» شماره‌ات را اضافه کن.</Text>
+            <Text style={styles.anonymousNotice}>شماره موبایل لازم نیست. هر وقت خواستی، بعداً از «حساب من» ثبتش کن.</Text>
           </View>
         )}
         {stage === 'phone' && (
@@ -253,7 +253,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
               textAlign="center"
               value={phone}
             />
-            <Pressable onPress={() => { setError(''); setStage('welcome'); }}><Text style={styles.link}>بازگشت به شروع بدون شماره</Text></Pressable>
+            <Pressable onPress={() => { setError(''); setStage('welcome'); }}><Text style={styles.link}>بی‌خیال، بدون شماره شروع می‌کنم</Text></Pressable>
           </>
         )}
         {stage === 'otp' && (
@@ -280,8 +280,8 @@ export function AuthGate({ children }: { children: ReactNode }) {
         )}
         {stage === 'profile' && (
           <View style={styles.fields}>
-            <Text style={styles.label}>نام و نام خانوادگی</Text>
-            <TextInput accessibilityLabel="نام و نام خانوادگی" onChangeText={setFullName} placeholder="مثلاً امیر رضایی" placeholderTextColor="#A19BA9" style={styles.input} textAlign="right" value={fullName} />
+            <Text style={styles.label}>اسم تو</Text>
+            <TextInput accessibilityLabel="اسم تو" onChangeText={setFullName} placeholder="مثلاً امیر" placeholderTextColor="#A19BA9" style={styles.input} textAlign="right" value={fullName} />
           </View>
         )}
 
@@ -292,7 +292,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
           onPress={stage === 'phone' ? requestOtp : stage === 'otp' ? verifyOtp : saveProfile}
           style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, submitting && styles.buttonDisabled]}
         >
-          {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>{stage === 'phone' ? 'دریافت کد ورود' : stage === 'otp' ? 'تأیید و ورود' : 'ذخیره و شروع'}</Text>}
+          {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>{stage === 'phone' ? 'برایم کد بفرست' : stage === 'otp' ? 'تأیید و ورود' : 'شروع'}</Text>}
         </Pressable>}
       </ScrollView>
     </View>
