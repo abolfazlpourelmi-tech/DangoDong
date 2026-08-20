@@ -357,6 +357,7 @@ function DongoApp() {
   const [memberModal, setMemberModal] = useState(false);
   const [editMemberModal, setEditMemberModal] = useState(false);
   const [deleteStoryModal, setDeleteStoryModal] = useState(false);
+  const [signOutModal, setSignOutModal] = useState(false);
   const [memberMode, setMemberMode] = useState<'guest' | 'invite'>('guest');
   const [joinModal, setJoinModal] = useState(false);
   const [joinCode, setJoinCode] = useState('');
@@ -688,6 +689,7 @@ function DongoApp() {
     setCloudBusy(true);
     const { error } = await supabase.auth.signOut();
     setCloudBusy(false);
+    setSignOutModal(false);
     if (error) showToast('خروج از حساب انجام نشد؛ دوباره تلاش کن.');
   }
 
@@ -785,6 +787,7 @@ function DongoApp() {
     if (memberModal) { setMemberModal(false); return true; }
     if (editMemberModal) { setEditMemberModal(false); return true; }
     if (deleteStoryModal) { setDeleteStoryModal(false); return true; }
+    if (signOutModal) { setSignOutModal(false); return true; }
     if (familyInfoModal) { setFamilyInfoModal(false); return true; }
     if (deleteExpenseTarget) { setDeleteExpenseTarget(null); return true; }
     if (pendingTransfer) { setPendingTransfer(null); return true; }
@@ -794,7 +797,7 @@ function DongoApp() {
   }
 
   const canGoBackInApp = storyModal || joinModal || storySwitcher || finishModal || notificationsModal
-    || expenseDetailsModal || expenseModal || memberModal || editMemberModal || deleteStoryModal
+    || expenseDetailsModal || expenseModal || memberModal || editMemberModal || deleteStoryModal || signOutModal
     || Boolean(pendingTransfer) || Boolean(deleteExpenseTarget) || familyInfoModal || tab !== 'home' || !storiesHome;
 
   useEffect(() => {
@@ -809,7 +812,7 @@ function DongoApp() {
       return true;
     });
     return () => subscription.remove();
-  }, [storyModal, storyStep, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, pendingTransfer, deleteExpenseTarget, familyInfoModal, tab, storiesHome]);
+  }, [storyModal, storyStep, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, signOutModal, pendingTransfer, deleteExpenseTarget, familyInfoModal, tab, storiesHome]);
 
   useEffect(() => {
     if (!storyId) return;
@@ -1666,7 +1669,7 @@ function DongoApp() {
           style={styles.accountHero}
         >
           <View style={styles.accountHeroIcon}><UserRound size={30} color="#FFFFFF" /></View>
-          <View style={styles.accountHeroCopy}><AppText style={styles.accountTitle}>حساب کاربری</AppText><AppText style={styles.accountSubtitle}>اطلاعاتت فقط برای تجربه بهتر و تسویه دنگ‌ها استفاده می‌شود.</AppText></View>
+          <View style={styles.accountHeroCopy}><AppText style={styles.accountTitle}>حساب من</AppText><AppText style={styles.accountSubtitle}>این اطلاعات فقط برای اینکه بقیه بدانند دنگت را به کجا بریزند استفاده می‌شود.</AppText></View>
         </Pressable>
         {adPanelOpen && (
           <View style={styles.adPanel}>
@@ -1698,8 +1701,8 @@ function DongoApp() {
         )}
         {accountLoading ? <View style={styles.accountCard}><AppText style={styles.accountHint}>اطلاعات حساب در حال بارگذاری است…</AppText></View> : <View style={styles.accountCard}>
           <AppText style={styles.accountSectionTitle}>اطلاعات من</AppText>
-          <AppText style={styles.accountLabel}>نام و نام خانوادگی <AppText style={styles.requiredMark}>*</AppText></AppText>
-          <TextInput accessibilityLabel="نام و نام خانوادگی حساب کاربری" value={accountName} onChangeText={setAccountName} placeholder="مثلاً امیر رضایی" placeholderTextColor={C.faint} style={styles.accountInput} textAlign="right" />
+          <AppText style={styles.accountLabel}>اسم تو <AppText style={styles.requiredMark}>*</AppText></AppText>
+          <TextInput accessibilityLabel="اسم تو" value={accountName} onChangeText={setAccountName} placeholder="مثلاً امیر" placeholderTextColor={C.faint} style={styles.accountInput} textAlign="right" />
           <AppText style={styles.accountLabel}>شماره موبایل</AppText>
           {accountPhone ? (
             <View style={styles.readonlyField}>
@@ -1773,7 +1776,7 @@ function DongoApp() {
           {accountError ? <AppText style={styles.accountError}>{accountError}</AppText> : null}
           <Pressable accessibilityRole="button" disabled={accountSaving} onPress={() => void saveAccount()} style={({ pressed }) => [styles.accountSaveButton, pressed && styles.pressed, accountSaving && styles.saveButtonDisabled]}><AppText style={styles.accountSaveText}>{accountSaving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}</AppText></Pressable>
         </View>}
-        <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => void signOut()} style={({ pressed }) => [styles.accountLogoutButton, pressed && styles.pressed, cloudBusy && { opacity: 0.65 }]}><LogOut size={18} color={C.debt} /><AppText style={styles.accountLogoutText}>خروج از حساب کاربری</AppText></Pressable>
+        <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => setSignOutModal(true)} style={({ pressed }) => [styles.accountLogoutButton, pressed && styles.pressed, cloudBusy && { opacity: 0.65 }]}><LogOut size={18} color={C.debt} /><AppText style={styles.accountLogoutText}>خروج از حساب</AppText></Pressable>
         {/* The ad diagnostics panel is support tooling, not a feature. It stays
             reachable by long-pressing the header above, so nobody has to read
             "وضعیت فنی تبلیغ‌ها" and wonder whether it is something they broke. */}
@@ -2429,6 +2432,23 @@ function DongoApp() {
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setDeleteExpenseTarget(null)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (deleteExpenseTarget) void deleteExpense(deleteExpenseTarget); }}><Trash2 size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال حذف…' : 'بله، حذف کن'}</AppText></Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={signOutModal} animationType="fade" transparent onRequestClose={() => setSignOutModal(false)}>
+        <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
+          <View style={styles.finishDialog} accessibilityViewIsModal>
+            <View style={styles.deleteDialogIcon}><AlertTriangle size={29} color={C.debt} /></View>
+            <AppText style={styles.dialogTitle}>از حساب خارج شوی؟</AppText>
+            <AppText style={styles.finishDialogText}>{accountPhone
+              ? `بعداً با شماره ${accountPhone} دوباره وارد شو تا همه ماجراها و خرج‌هایت برگردند.`
+              : 'چون هنوز شماره موبایلی ثبت نکرده‌ای، هیچ راهی برای ورود دوباره به این حساب نیست.'}</AppText>
+            {!accountPhone && <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>همه ماجراها، خرج‌ها و تسویه‌هایت از دسترس خارج می‌شوند و برنمی‌گردند.</AppText></View>}
+            <View style={styles.dialogActions}>
+              <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setSignOutModal(false)}><AppText style={styles.dialogCancelText}>{accountPhone ? 'انصراف' : 'می‌مانم'}</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => void signOut()}><LogOut size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال خروج…' : 'بله، خارج شو'}</AppText></Pressable>
             </View>
           </View>
         </View>
