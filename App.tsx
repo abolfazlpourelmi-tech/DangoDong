@@ -370,6 +370,10 @@ function DongoApp() {
   const [payerId, setPayerId] = useState('');
   const [selectedPersonIds, setSelectedPersonIds] = useState<string[]>([]);
   const [splitMode, setSplitMode] = useState<SplitMode>('equal');
+  // Almost every real expense is split equally, but the three split modes were
+  // always on screen, so every user had to read and rule out two of them before
+  // reaching the part they needed. They live behind a question now.
+  const [splitOptionsOpen, setSplitOptionsOpen] = useState(false);
   const [shareInputs, setShareInputs] = useState<Record<string, string>>({});
   const [itemLabels, setItemLabels] = useState<Record<string, string>>({});
   const [newMemberName, setNewMemberName] = useState('');
@@ -865,6 +869,7 @@ function DongoApp() {
     setShareInputs(nextShares);
     setItemLabels(nextItems);
     setSplitMode(Object.keys(nextItems).length ? 'itemized' : looksEqual ? 'equal' : 'custom');
+    setSplitOptionsOpen(false);
     setExpenseDetailsModal(false);
     setExpenseModal(true);
   }
@@ -905,6 +910,7 @@ function DongoApp() {
     setPayerId(currentMember?.id ?? members[0]?.id ?? '');
     setSelectedPersonIds(members.map((member) => `${member.id}::0`));
     setSplitMode('equal');
+    setSplitOptionsOpen(false);
     setShareInputs({});
     setItemLabels({});
     setExpenseModal(true);
@@ -1746,9 +1752,9 @@ function DongoApp() {
           <Pressable accessibilityRole="button" disabled={accountSaving} onPress={() => void saveAccount()} style={({ pressed }) => [styles.accountSaveButton, pressed && styles.pressed, accountSaving && styles.saveButtonDisabled]}><AppText style={styles.accountSaveText}>{accountSaving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}</AppText></Pressable>
         </View>}
         <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => void signOut()} style={({ pressed }) => [styles.accountLogoutButton, pressed && styles.pressed, cloudBusy && { opacity: 0.65 }]}><LogOut size={18} color={C.debt} /><AppText style={styles.accountLogoutText}>خروج از حساب کاربری</AppText></Pressable>
-        <Pressable accessibilityRole="button" onPress={() => setAdPanelOpen((open) => !open)} style={styles.adPanelToggle}>
-          <AppText style={styles.adPanelToggleText}>{adPanelOpen ? 'بستن وضعیت فنی تبلیغ‌ها' : 'وضعیت فنی تبلیغ‌ها'}</AppText>
-        </Pressable>
+        {/* The ad diagnostics panel is support tooling, not a feature. It stays
+            reachable by long-pressing the header above, so nobody has to read
+            "وضعیت فنی تبلیغ‌ها" and wonder whether it is something they broke. */}
       </View>
     );
   }
@@ -1765,9 +1771,12 @@ function DongoApp() {
               <Sparkles size={14} color="#FFE49B" fill="#FFE49B" />
               <AppText style={styles.heroTagText}>وضعیت حساب تو</AppText>
             </View>
-            <AppText style={styles.heroLabel}>{positive ? 'در این ماجرا طلب داری' : 'در این ماجرا بدهکاری'}</AppText>
-            <AppText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.55} style={styles.heroAmount}>{formatMoney(Math.abs(currentBalance))}</AppText>
-            <AppText style={styles.heroHint}>{positive ? 'طلب‌هات برای این ماجرا اینجا جمع می‌شن ✨' : 'نگران نباش؛ آخر ماجرا یک‌جا تسویه کن'}</AppText>
+            {/* A balance of zero used to read "طلب داری ۰ تومان". */}
+            <AppText style={styles.heroLabel}>{currentBalance === 0 ? 'حسابت با بقیه صاف است' : positive ? 'بقیه به تو بدهکارند' : 'تو بدهکاری'}</AppText>
+            {currentBalance !== 0 && <AppText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.55} style={styles.heroAmount}>{formatMoney(Math.abs(currentBalance))}</AppText>}
+            <AppText style={styles.heroHint}>{currentBalance === 0
+              ? 'نه از کسی طلب داری، نه به کسی بدهکاری.'
+              : 'برای دیدن اینکه چه کسی به چه کسی بدهد، پایین صفحه «تسویه» را بزن.'}</AppText>
           </View>
           <Image source={require('./assets/dong-mascot-optimized.png')} style={styles.heroMascot} resizeMode="contain" />
         </LinearGradient>
@@ -1807,7 +1816,11 @@ function DongoApp() {
             <View style={[styles.statIcon, { backgroundColor: C.mint }]}><Users size={20} color="#FFFFFF" /></View>
             <View style={styles.statCopy}>
               <AppText style={styles.statLabel}>اعضا</AppText>
-              <AppText style={styles.statValue}>{faNumber.format(totalShareUnits)} نفر و {faNumber.format(members.length)} حساب</AppText>
+              {/* "۴ نفر و ۴ حساب" reads like a glitch when the two match, and the
+                  distinction only earns its place once somebody has a household. */}
+              <AppText style={styles.statValue}>{totalShareUnits === members.length
+                ? `${faNumber.format(members.length)} نفر`
+                : `${faNumber.format(totalShareUnits)} نفر در ${faNumber.format(members.length)} حساب`}</AppText>
             </View>
           </View>
         </View>
@@ -1822,7 +1835,7 @@ function DongoApp() {
           </View>
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.membersStrip}>
+        <View style={styles.membersStrip}>
           {members.map((member) => {
             const balance = balances.find((item) => item.memberId === member.id)?.amount ?? 0;
             return (
@@ -1837,13 +1850,15 @@ function DongoApp() {
                   <AppText style={[styles.memberBalance, { color: balance >= 0 ? C.mintDark : C.debt }]}>
                     {balance >= 0 ? 'طلبکار' : 'بدهکار'} · {faNumber.format(Math.abs(balance))}
                   </AppText>
-                  <View style={styles.memberUnitsBadge}><Users size={11} color={C.purple} /><AppText style={styles.memberUnitsText}>{faNumber.format(member.shareUnits ?? 1)} سهم</AppText></View>
+                  {/* "۱ سهم" on a one-person account is accounting vocabulary with
+                      nothing to say. It only means something above one. */}
+                  {(member.shareUnits ?? 1) > 1 && <View style={styles.memberUnitsBadge}><Users size={11} color={C.purple} /><AppText style={styles.memberUnitsText}>دنگ {faNumber.format(member.shareUnits ?? 1)} نفر</AppText></View>}
                   {(member.shareUnits ?? 1) > 1 && <AppText numberOfLines={2} style={styles.householdNamesPreview}>{member.householdMembers?.length ? member.householdMembers.join('، ') : 'برای ثبت اسم افراد، کارت را بزن'}</AppText>}
                 </View>
               </Pressable>
             );
           })}
-        </ScrollView>
+        </View>
 
         {members.length === 1 && !storyCompleted && (
           <View style={styles.loneMemberNotice}>
@@ -1874,7 +1889,7 @@ function DongoApp() {
         {storyCompleted ? (
           <View style={styles.finishedNotice}><View style={styles.finishedNoticeIcon}><Check size={20} color={C.mintDark} /></View><View style={styles.finishedNoticeCopy}><AppText style={styles.finishedNoticeTitle}>این ماجرا تمام شده</AppText><AppText style={styles.finishedNoticeText}>اطلاعات برای مرور و تسویه نهایی نگه داشته شده‌اند.</AppText></View></View>
         ) : (
-          <Pressable accessibilityRole="button" onPress={() => setFinishModal(true)} style={styles.finishStoryButton}><Check size={19} color={C.debt} /><View style={styles.finishStoryCopy}><AppText style={styles.finishStoryTitle}>اتمام ماجرا</AppText><AppText style={styles.finishStoryText}>وقتی همه هزینه‌ها ثبت شد، ماجرا را ببند.</AppText></View></Pressable>
+          <Pressable accessibilityRole="button" onPress={() => setFinishModal(true)} style={styles.finishStoryButton}><Check size={19} color={C.mintDark} /><View style={styles.finishStoryCopy}><AppText style={styles.finishStoryTitle}>اتمام ماجرا</AppText><AppText style={styles.finishStoryText}>وقتی همه خرج‌ها ثبت شد و همه تسویه کردند، ماجرا را ببند.</AppText></View></Pressable>
         )}
         {canManageGuests && <Pressable accessibilityRole="button" onPress={() => setDeleteStoryModal(true)} style={styles.deleteStoryButton}><Trash2 size={18} color={C.debt} /><View style={styles.finishStoryCopy}><AppText style={styles.deleteStoryTitle}>حذف ماجرا</AppText><AppText style={styles.finishStoryText}>همه هزینه‌ها، اعضا و تسویه‌های این ماجرا حذف می‌شوند.</AppText></View></Pressable>}
       </>
@@ -1976,9 +1991,11 @@ function DongoApp() {
           <View style={styles.settlementConfettiTwo} />
           <View style={styles.settlementHeroIcon}><HandCoins size={30} color={C.purple} /></View>
           <View style={styles.settlementHeroCopy}>
-            <AppText style={styles.settlementKicker}>راه ساده‌ی تسویه</AppText>
-            <AppText style={styles.settlementHeadline}>فقط با {faNumber.format(transfers.length)} انتقال، حساب‌ها صفر می‌شه</AppText>
-            <AppText style={styles.settlementDescription}>{exactSettlement ? 'کمترین تعداد انتقال برای این ماجرا محاسبه شده.' : 'یک مسیر ساده و مستقیم برای تسویه پیشنهاد شده.'}</AppText>
+            <AppText style={styles.settlementKicker}>تسویه حساب</AppText>
+            <AppText style={styles.settlementHeadline}>{transfers.length
+              ? `${faNumber.format(transfers.length)} پرداخت مانده تا حساب همه صاف شود`
+              : 'حساب همه صاف است'}</AppText>
+            <AppText style={styles.settlementDescription}>پایین لیست شده که هر کس چقدر و به چه کسی بدهد. بعد از هر پرداخت، همان‌جا ثبتش کن.</AppText>
           </View>
         </View>
 
@@ -1991,8 +2008,12 @@ function DongoApp() {
                 <Avatar member={member} size={34} />
                 <View style={styles.balancePillCopy}>
                   <AppText style={styles.balancePillName}>{member?.name}</AppText>
+                  {/* A leading + or − is a maths convention, not a Persian one.
+                      The words say the same thing without needing to be taught. */}
                   <AppText style={[styles.balancePillValue, { color: positive ? C.mintDark : C.debt }]}>
-                    {positive ? '+' : '−'}{faNumber.format(Math.abs(balance.amount))}
+                    {balance.amount === 0
+                      ? 'حسابش صاف است'
+                      : `${faNumber.format(Math.abs(balance.amount))} ${positive ? 'طلبکار' : 'بدهکار'}`}
                   </AppText>
                 </View>
               </View>
@@ -2000,9 +2021,10 @@ function DongoApp() {
           })}
         </View>
 
+        {/* "کمینه قطعی" was the algorithm describing itself. Whether the plan is
+            provably minimal or merely direct changes nothing the user has to do. */}
         <View style={styles.sectionHeadSimple}>
-          <View style={styles.optimizedBadge}><Check size={14} color={C.mintDark} /><AppText style={styles.optimizedText}>{exactSettlement ? 'کمینه قطعی' : 'پیشنهادی'}</AppText></View>
-          <AppText style={styles.sectionTitle}>چه کسی به چه کسی؟</AppText>
+          <AppText style={styles.sectionTitle}>چه کسی به چه کسی پول بدهد</AppText>
         </View>
         <View style={styles.transferList}>
           {transfers.length === 0 ? (
@@ -2019,9 +2041,9 @@ function DongoApp() {
               <View style={styles.transferCard} key={`${transfer.fromId}-${transfer.toId}-${index}`}>
                 <View style={styles.stepBadge}><AppText style={styles.stepNumber}>{faNumber.format(index + 1)}</AppText></View>
                 <View style={styles.transferPeople}>
-                  <View style={styles.transferPerson}><Avatar member={from} size={44} /><AppText style={styles.transferName}>{from?.name}</AppText><AppText style={styles.transferRole}>پرداخت‌کننده</AppText></View>
+                  <View style={styles.transferPerson}><Avatar member={from} size={44} /><AppText style={styles.transferName}>{from?.isMe ? 'من' : from?.name}</AppText><AppText style={styles.transferRole}>می‌دهد به</AppText></View>
                   <View style={styles.transferArrow}><ArrowLeft size={23} color={C.purple} strokeWidth={2.5} /></View>
-                  <View style={styles.transferPerson}><Avatar member={to} size={44} /><AppText style={styles.transferName}>{to?.name}</AppText><AppText style={styles.transferRole}>دریافت‌کننده</AppText></View>
+                  <View style={styles.transferPerson}><Avatar member={to} size={44} /><AppText style={styles.transferName}>{to?.isMe ? 'من' : to?.name}</AppText><AppText style={styles.transferRole}>می‌گیرد</AppText></View>
                 </View>
                 <View style={styles.transferDivider} />
                 {toCard ? (
@@ -2047,11 +2069,13 @@ function DongoApp() {
                   </View>
                 )}
                 <View style={styles.transferFooter}>
+                  {/* The same button used to say "پرداخت کردم" on every row, even
+                      the rows where the reader is the one being paid. */}
                   <Pressable accessibilityRole="button" accessibilityLabel={`ثبت پرداخت ${formatMoney(transfer.amount)} از ${from?.name} به ${to?.name}`} accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.paidButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => setPendingTransfer(transfer)}>
-                    <Check size={16} color={C.purple} /><AppText style={styles.paidButtonText}>پرداخت کردم</AppText>
+                    <Check size={16} color={C.purple} /><AppText style={styles.paidButtonText}>{from?.isMe ? 'پرداخت کردم' : to?.isMe ? 'دریافت کردم' : 'پرداخت شد'}</AppText>
                   </Pressable>
                   <View style={styles.transferAmountBox}>
-                    <AppText style={styles.transferAmountLabel}>مبلغ انتقال</AppText>
+                    <AppText style={styles.transferAmountLabel}>مبلغ</AppText>
                     <AppText style={styles.transferAmount}>{formatMoney(transfer.amount)}</AppText>
                   </View>
                 </View>
@@ -2408,7 +2432,7 @@ function DongoApp() {
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
               <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => { setExpenseModal(false); setEditingExpense(null); }}><X size={21} color={C.ink} /></Pressable>
-              <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>{editingExpense ? 'ویرایش خرج' : 'خرج جدید'}</AppText><AppText style={styles.sheetSubtitle}>{editingExpense ? 'تغییرات روی دنگ همه اعضا اثر می‌گذارد' : 'اول مبلغ، بعد جزئیات ساده'}</AppText></View>
+              <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>{editingExpense ? 'ویرایش خرج' : 'خرج جدید'}</AppText><AppText style={styles.sheetSubtitle}>{editingExpense ? 'تغییرات روی دنگ همه اثر می‌گذارد' : 'مبلغی که پرداخت شد را وارد کن'}</AppText></View>
               <View style={styles.sheetSpark}><Sparkles size={20} color={C.purple} /></View>
             </View>
 
@@ -2432,7 +2456,7 @@ function DongoApp() {
                 {numericAmount > 0 && <AppText style={styles.amountHint}>سهم تقریبی هر نفر: {formatMoney(sharePreview)}</AppText>}
               </View>
 
-              <AppText style={styles.formLabel}>برای چی بود؟</AppText>
+              <AppText style={styles.formLabel}>خرجِ چی بود؟</AppText>
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.categoryChoices}>
                 {CATEGORIES.map((item) => {
                   const Icon = item.Icon;
@@ -2447,7 +2471,7 @@ function DongoApp() {
                 })}
               </ScrollView>
 
-              <AppText style={styles.formLabel}>عنوان هزینه</AppText>
+              <AppText style={styles.formLabel}>اسم این خرج (دلخواه)</AppText>
               <TextInput style={styles.formInput} value={title} onChangeText={setTitle} placeholder="مثلاً شام کنار دریا" placeholderTextColor={C.faint} textAlign="right" />
 
               <AppText style={styles.formLabel}>چه کسی پرداخت کرد؟</AppText>
@@ -2463,27 +2487,30 @@ function DongoApp() {
                 })}
               </ScrollView>
 
-              <View style={styles.splitHeader}><View><AppText style={styles.formLabelNoMargin}>چطور تقسیم بشه؟</AppText><AppText style={styles.formHelper}>سهم هر نفر را مشخص کن</AppText></View></View>
-              <View style={styles.splitModeRow}>
-                {([
-                  { id: 'equal', label: 'مساوی' },
-                  { id: 'custom', label: 'مبلغ دلخواه' },
-                  { id: 'itemized', label: 'ریز اقلام' },
-                ] as const).map((mode) => <Pressable key={mode.id} accessibilityRole="radio" accessibilityState={{ selected: splitMode === mode.id }} onPress={() => setSplitMode(mode.id)} style={[styles.splitModeButton, splitMode === mode.id && styles.splitModeButtonActive]}><AppText style={[styles.splitModeText, splitMode === mode.id && styles.splitModeTextActive]}>{mode.label}</AppText></Pressable>)}
-              </View>
 
               {splitMode === 'equal' ? (
                 <>
-                  <View style={styles.splitHeader}><View style={styles.equalBadge}><AppText style={styles.equalBadgeText}>حدوداً هر نفر: {formatMoney(sharePreview)}</AppText></View><View><AppText style={styles.formLabelNoMargin}>چه کسانی در این هزینه بودند؟</AppText><AppText style={styles.formHelper}>{faNumber.format(selectedShareUnits)} نفر انتخاب شده؛ سرپرست هر حساب از ابتدا فعال است.</AppText></View></View>
-                  <View style={styles.householdAccountsList}>
-                    {members.map((member) => <View key={member.id} style={styles.householdAccountCard}>
-                      <View style={styles.householdAccountHead}><Avatar member={member} size={36} /><View style={styles.householdAccountCopy}><AppText style={styles.householdAccountName}>{member.isMe ? 'حساب من' : member.name}</AppText><AppText style={styles.householdAccountHint}>{faNumber.format(member.shareUnits ?? 1)} نفر در این حساب</AppText></View></View>
-                      <View style={styles.personNameChips}>{expensePeople.filter((person) => person.memberId === member.id).map((person) => {
-                        const active = selectedPersonIds.includes(person.id);
-                        return <Pressable key={person.id} accessibilityRole="checkbox" accessibilityState={{ checked: active }} onPress={() => toggleExpensePerson(person.id)} style={[styles.personNameChip, active && styles.personNameChipActive]}><AppText style={[styles.personNameChipText, active && styles.personNameChipTextActive]}>{person.name}</AppText>{active && <Check size={12} color="#FFFFFF" />}</Pressable>;
-                      })}</View>
-                    </View>)}
-                  </View>
+                  <View style={styles.splitHeader}><View style={styles.equalBadge}><AppText style={styles.equalBadgeText}>حدوداً هر نفر: {formatMoney(sharePreview)}</AppText></View><View><AppText style={styles.formLabelNoMargin}>چه کسانی در این خرج بودند؟</AppText><AppText style={styles.formHelper}>همه از اول انتخاب‌اند. اگر کسی نبوده، اسمش را بزن تا خاموش شود.</AppText></View></View>
+                  {/* With no households in the story every account is one person,
+                      and wrapping each single name in its own titled card just
+                      makes a short list look like a form. */}
+                  {members.some((member) => (member.shareUnits ?? 1) > 1) ? (
+                    <View style={styles.householdAccountsList}>
+                      {members.map((member) => <View key={member.id} style={styles.householdAccountCard}>
+                        <View style={styles.householdAccountHead}><Avatar member={member} size={36} /><View style={styles.householdAccountCopy}><AppText style={styles.householdAccountName}>{member.isMe ? 'حساب من' : member.name}</AppText><AppText style={styles.householdAccountHint}>{(member.shareUnits ?? 1) > 1 ? `${faNumber.format(member.shareUnits ?? 1)} نفر در این حساب` : 'یک نفر'}</AppText></View></View>
+                        <View style={styles.personNameChips}>{expensePeople.filter((person) => person.memberId === member.id).map((person) => {
+                          const active = selectedPersonIds.includes(person.id);
+                          return <Pressable key={person.id} accessibilityRole="checkbox" accessibilityState={{ checked: active }} onPress={() => toggleExpensePerson(person.id)} style={[styles.personNameChip, active && styles.personNameChipActive]}><AppText style={[styles.personNameChipText, active && styles.personNameChipTextActive]}>{person.name}</AppText>{active && <Check size={12} color="#FFFFFF" />}</Pressable>;
+                        })}</View>
+                      </View>)}
+                    </View>
+                  ) : (
+                    <View style={styles.personNameChips}>{expensePeople.map((person) => {
+                      const active = selectedPersonIds.includes(person.id);
+                      const member = memberById(person.memberId);
+                      return <Pressable key={person.id} accessibilityRole="checkbox" accessibilityState={{ checked: active }} onPress={() => toggleExpensePerson(person.id)} style={[styles.personNameChip, active && styles.personNameChipActive]}><AppText style={[styles.personNameChipText, active && styles.personNameChipTextActive]}>{member?.isMe ? 'من' : person.name}</AppText>{active && <Check size={12} color="#FFFFFF" />}</Pressable>;
+                    })}</View>
+                  )}
                 </>
               ) : (
                 <View style={styles.shareList}>
@@ -2500,12 +2527,28 @@ function DongoApp() {
                   <View style={[styles.shareTotal, enteredShareTotal === numericAmount && numericAmount > 0 ? styles.shareTotalValid : styles.shareTotalInvalid]}><AppText style={styles.shareTotalLabel}>جمع سهم‌ها</AppText><AppText style={styles.shareTotalValue}>{formatMoney(enteredShareTotal)} از {formatMoney(numericAmount)}</AppText></View>
                 </View>
               )}
+              {splitOptionsOpen || splitMode !== 'equal' ? (
+                <>
+                  <View style={styles.splitHeader}><View><AppText style={styles.formLabelNoMargin}>چطور تقسیم بشه؟</AppText></View></View>
+                  <View style={styles.splitModeRow}>
+                    {([
+                      { id: 'equal', label: 'مساوی' },
+                      { id: 'custom', label: 'مبلغ هر نفر جدا' },
+                      { id: 'itemized', label: 'سفارش هر نفر' },
+                    ] as const).map((mode) => <Pressable key={mode.id} accessibilityRole="radio" accessibilityState={{ selected: splitMode === mode.id }} onPress={() => setSplitMode(mode.id)} style={[styles.splitModeButton, splitMode === mode.id && styles.splitModeButtonActive]}><AppText style={[styles.splitModeText, splitMode === mode.id && styles.splitModeTextActive]}>{mode.label}</AppText></Pressable>)}
+                  </View>
+                </>
+              ) : (
+                <Pressable accessibilityRole="button" onPress={() => setSplitOptionsOpen(true)} style={styles.splitDisclosure}>
+                  <AppText style={styles.splitDisclosureText}>سهم همه مساوی نیست؟</AppText>
+                </Pressable>
+              )}
             </ScrollView>
 
             <View style={styles.sheetFooter}>
-              <View style={styles.footerPreview}><AppText style={styles.footerPreviewLabel}>{splitMode === 'equal' ? 'مجموع سهم' : 'جمع سهم‌ها'}</AppText><AppText style={styles.footerPreviewValue}>{splitMode === 'equal' ? `${faNumber.format(selectedShareUnits)} سهم` : formatMoney(enteredShareTotal)}</AppText></View>
+              <View style={styles.footerPreview}><AppText style={styles.footerPreviewLabel}>{splitMode === 'equal' ? 'تقسیم بین' : 'جمع سهم‌ها'}</AppText><AppText style={styles.footerPreviewValue}>{splitMode === 'equal' ? `${faNumber.format(selectedShareUnits)} نفر` : formatMoney(enteredShareTotal)}</AppText></View>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: !isExpenseValid }} disabled={!isExpenseValid} onPress={addExpense} style={({ pressed }) => [styles.saveButton, !isExpenseValid && styles.saveButtonDisabled, pressed && isExpenseValid && styles.pressed]}>
-                <Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>{editingExpense ? 'ذخیره تغییرات' : 'ثبت و محاسبه دنگ'}</AppText>
+                <Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>{editingExpense ? 'ذخیره تغییرات' : 'ثبت خرج'}</AppText>
               </Pressable>
             </View>
           </View>
@@ -2615,8 +2658,8 @@ const styles = StyleSheet.create({
   sectionTitle: { fontFamily: F.extra, fontSize: 18, lineHeight: 28 },
   textButton: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10 },
   textButtonLabel: { fontFamily: F.semi, fontSize: 11, color: C.purple },
-  membersStrip: { flexDirection: 'row-reverse', gap: 10, paddingBottom: 4 },
-  memberCard: { minWidth: 170, backgroundColor: C.paper, borderRadius: 22, padding: 12, flexDirection: 'row-reverse', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.line },
+  membersStrip: { flexDirection: 'row-reverse', flexWrap: 'wrap', gap: 10, paddingBottom: 4 },
+  memberCard: { flexGrow: 1, flexBasis: '46%', minWidth: 150, backgroundColor: C.paper, borderRadius: 22, padding: 12, flexDirection: 'row-reverse', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.line },
   memberCardCopy: { flex: 1, alignItems: 'flex-end' },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   memberCardName: { fontFamily: F.bold, fontSize: 14 },
@@ -2857,6 +2900,8 @@ const styles = StyleSheet.create({
   inlineEmptyText: { fontFamily: F.medium, fontSize: 10, color: C.muted, textAlign: 'center', marginTop: 4 },
   inlineEmptyButton: { minHeight: 43, marginTop: 14, borderRadius: 15, backgroundColor: C.coral, paddingHorizontal: 15, flexDirection: 'row', alignItems: 'center', gap: 6 },
   inlineEmptyButtonText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 10 },
+  splitDisclosure: { minHeight: 44, alignItems: 'flex-end', justifyContent: 'center', marginTop: 14 },
+  splitDisclosureText: { fontFamily: F.bold, fontSize: 11, color: C.purple, textDecorationLine: 'underline' },
   splitModeRow: { flexDirection: 'row-reverse', gap: 7 },
   splitModeButton: { flex: 1, minHeight: 44, borderRadius: 15, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
   splitModeButtonActive: { backgroundColor: C.purplePale, borderColor: C.purple },
@@ -2983,11 +3028,11 @@ const styles = StyleSheet.create({
   dashboardStoryTotal: { fontFamily: F.bold, fontSize: 10, marginTop: 5 },
   completedBadge: { minHeight: 25, borderRadius: 9, paddingHorizontal: 7, backgroundColor: C.mintPale, flexDirection: 'row', alignItems: 'center', gap: 3 },
   completedBadgeText: { fontFamily: F.bold, color: C.mintDark, fontSize: 7 },
-  finishStoryButton: { minHeight: 72, borderRadius: 20, borderWidth: 1, borderColor: '#F2C4CD', backgroundColor: C.debtPale, marginTop: 20, padding: 13, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
+  finishStoryButton: { minHeight: 72, borderRadius: 20, borderWidth: 1, borderColor: '#BFE9DA', backgroundColor: C.mintPale, marginTop: 20, padding: 13, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
   deleteStoryButton: { minHeight: 66, borderRadius: 20, borderWidth: 1, borderColor: '#F2C4CD', backgroundColor: C.paper, marginTop: 10, padding: 13, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
   deleteStoryTitle: { fontFamily: F.extra, color: C.debt, fontSize: 12 },
   finishStoryCopy: { flex: 1, alignItems: 'flex-end' },
-  finishStoryTitle: { fontFamily: F.extra, color: C.debt, fontSize: 13 },
+  finishStoryTitle: { fontFamily: F.extra, color: C.mintDark, fontSize: 13 },
   finishStoryText: { fontFamily: F.medium, color: C.muted, fontSize: 8, marginTop: 3 },
   finishedNotice: { minHeight: 72, borderRadius: 20, borderWidth: 1, borderColor: '#BDE5D7', backgroundColor: C.mintPale, marginTop: 20, padding: 13, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
   finishedNoticeIcon: { width: 42, height: 42, borderRadius: 15, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center' },
