@@ -910,7 +910,7 @@ function DongoApp() {
 
   function openExpenseModal() {
     if (storyCompleted) {
-      showToast('این ماجرا تمام شده و فقط برای مرور در دسترس است');
+      showToast('این ماجرا تمام شده؛ فقط می‌توانی مرورش کنی.');
       return;
     }
     setEditingExpense(null);
@@ -1067,6 +1067,14 @@ function DongoApp() {
 
   async function finishStory() {
     if (!storyId || storyCompleted || cloudBusy) return;
+    if (isLocalWebPreview) {
+      setStories((current) => current.map((story) => (story.id === storyId ? { ...story, status: 'completed' as const } : story)));
+      setFinishModal(false);
+      setStoriesHome(true);
+      setTab('home');
+      showToast(`ماجرای «${storyName}» با موفقیت تمام شد`);
+      return;
+    }
     setCloudBusy(true);
     try {
       await completeOnlineStory(storyId);
@@ -1118,6 +1126,16 @@ function DongoApp() {
 
   async function markTransferPaid(transfer: Transfer) {
     if (!storyId || cloudBusy) return;
+    if (isLocalWebPreview) {
+      const payment: SettlementPayment = { id: `local-payment-${Date.now()}`, createdAt: new Date().toISOString(), fromId: transfer.fromId, toId: transfer.toId, amount: transfer.amount };
+      setPayments((current) => [...current, payment]);
+      setStories((current) => current.map((story) => (story.id === storyId
+        ? { ...story, payments: [...(story.payments ?? []), payment] }
+        : story)));
+      setPendingTransfer(null);
+      showToast('پرداخت آزمایشی ثبت شد.');
+      return;
+    }
     setCloudBusy(true);
     try {
       await recordOnlinePayment(storyId, transfer);
@@ -1371,6 +1389,19 @@ function DongoApp() {
   async function deleteStory() {
     if (!storyId || !canManageGuests || cloudBusy) return;
     const deletedName = storyName;
+    if (isLocalWebPreview) {
+      setStories((current) => current.filter((story) => story.id !== storyId));
+      setDeleteStoryModal(false);
+      setStoriesHome(true);
+      setTab('home');
+      setStoryId('');
+      setStoryName('');
+      setMembers([]);
+      setExpenses([]);
+      setPayments([]);
+      showToast(`ماجرای «${deletedName}» حذف شد`);
+      return;
+    }
     setCloudBusy(true);
     try {
       await deleteOnlineStory(storyId);
@@ -1940,7 +1971,7 @@ function DongoApp() {
           )}
         </View>
         {storyCompleted ? (
-          <View style={styles.finishedNotice}><View style={styles.finishedNoticeIcon}><Check size={20} color={C.mintDark} /></View><View style={styles.finishedNoticeCopy}><AppText style={styles.finishedNoticeTitle}>این ماجرا تمام شده</AppText><AppText style={styles.finishedNoticeText}>اطلاعات برای مرور و تسویه نهایی نگه داشته شده‌اند.</AppText></View></View>
+          <View style={styles.finishedNotice}><View style={styles.finishedNoticeIcon}><Check size={20} color={C.mintDark} /></View><View style={styles.finishedNoticeCopy}><AppText style={styles.finishedNoticeTitle}>این ماجرا تمام شده</AppText><AppText style={styles.finishedNoticeText}>همه‌چیز برای مرور نگه داشته شده؛ خرج تازه‌ای به آن اضافه نمی‌شود.</AppText></View></View>
         ) : (
           <Pressable accessibilityRole="button" onPress={() => setFinishModal(true)} style={styles.finishStoryButton}><Check size={19} color={C.mintDark} /><View style={styles.finishStoryCopy}><AppText style={styles.finishStoryTitle}>اتمام ماجرا</AppText><AppText style={styles.finishStoryText}>وقتی همه خرج‌ها ثبت شد و همه تسویه کردند، ماجرا را ببند.</AppText></View></Pressable>
         )}
@@ -2047,7 +2078,9 @@ function DongoApp() {
             <AppText style={styles.settlementHeadline}>{transfers.length
               ? `${faNumber.format(transfers.length)} پرداخت مانده تا حساب همه صاف شود`
               : 'حساب همه صاف است'}</AppText>
-            <AppText style={styles.settlementDescription}>پایین لیست شده که هر کس چقدر و به چه کسی بدهد. بعد از هر پرداخت، همان‌جا ثبتش کن.</AppText>
+            <AppText style={styles.settlementDescription}>{transfers.length
+              ? 'پایین لیست شده که هر کس چقدر و به چه کسی بدهد. بعد از هر پرداخت، همان‌جا ثبتش کن.'
+              : 'هیچ‌کس به کسی بدهکار نیست. اگر خرج تازه‌ای ثبت شود، دوباره اینجا حساب می‌شود.'}</AppText>
           </View>
         </View>
 
@@ -2075,9 +2108,11 @@ function DongoApp() {
 
         {/* "کمینه قطعی" was the algorithm describing itself. Whether the plan is
             provably minimal or merely direct changes nothing the user has to do. */}
-        <View style={styles.sectionHeadSimple}>
-          <AppText style={styles.sectionTitle}>چه کسی به چه کسی پول بدهد</AppText>
-        </View>
+        {transfers.length > 0 && (
+          <View style={styles.sectionHeadSimple}>
+            <AppText style={styles.sectionTitle}>چه کسی به چه کسی پول بدهد</AppText>
+          </View>
+        )}
         <View style={styles.transferList}>
           {transfers.length === 0 ? (
             <View style={styles.emptyCard}>
