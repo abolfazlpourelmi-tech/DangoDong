@@ -1499,6 +1499,7 @@ function DongoApp() {
       return (
         <>
           <AppText style={styles.formLabel}>اسم این ماجرا چیه؟</AppText>
+          <AppText style={styles.storyNameHelper}>اسم همان شام، سفر یا خریدی که می‌خواهی خرجش را با بقیه حساب کنی.</AppText>
           <TextInput style={styles.formInput} value={newStoryName} onChangeText={setNewStoryName} placeholder="مثلاً شام جمعه" placeholderTextColor={C.faint} textAlign="right" autoFocus />
 
           <AppText style={styles.formLabel}>چه جور ماجراییه؟</AppText>
@@ -2122,8 +2123,9 @@ function DongoApp() {
             <Image source={require('./assets/dong-mascot-optimized.png')} style={styles.welcomeMascot} resizeMode="contain" />
           </View>
           <View style={styles.welcomeCopy}>
-            <AppText style={styles.welcomeTitle}>هنوز هیچ ماجرایی برای دنگ‌هات نساختی</AppText>
-            <AppText style={styles.welcomeText}>یک ماجرا بساز و اسم همراه‌هایت را وارد کن. لازم نیست آن‌ها اپ نصب کنند؛ حساب همه دست توست.</AppText>
+            <AppText style={styles.welcomeTitle}>هنوز هیچ ماجرایی نساختی</AppText>
+            <AppText style={styles.welcomeText}>هر شام، سفر یا خرید مشترکی که خرجش را با هم حساب می‌کنید، اینجا یک «ماجرا» است.</AppText>
+            <AppText style={styles.welcomeText}>یکی بساز و اسم همراه‌هایت را وارد کن. لازم نیست آن‌ها اپ نصب کنند؛ حساب همه دست توست.</AppText>
           </View>
           <Pressable accessibilityRole="button" style={styles.primaryStoryButton} onPress={openNewStory}>
             <Plus size={21} color="#FFFFFF" />
@@ -2916,6 +2918,7 @@ const styles = StyleSheet.create({
   storyTemplateText: { flex: 1, fontFamily: F.semi, fontSize: 10, color: C.muted, textAlign: 'right' },
   storyTemplateTextActive: { fontFamily: F.bold, color: C.purple },
   storyTemplateCheck: { position: 'absolute', top: 6, left: 6, width: 18, height: 18, borderRadius: 7, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center' },
+  storyNameHelper: { fontFamily: F.medium, color: C.muted, fontSize: 10, lineHeight: 18, textAlign: 'right', marginTop: -4, marginBottom: 9 },
   storyHelper: { fontFamily: F.medium, color: C.muted, fontSize: 9, lineHeight: 18, textAlign: 'right', marginTop: 12 },
   createStoryButton: { minHeight: 55, borderRadius: 18, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18 },
   createStoryButtonGrow: { flex: 1, minHeight: 55, borderRadius: 18, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 10 },
