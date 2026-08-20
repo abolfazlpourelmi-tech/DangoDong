@@ -68,6 +68,7 @@ import {
   subscribeToStoryChanges,
   updateOnlineMember,
   deleteOnlineStory,
+  deleteOnlineGuest,
   updateOnlineExpense,
   deleteOnlineExpense,
   loadStoryMemberCards,
@@ -359,6 +360,7 @@ function DongoApp() {
   const [editMemberModal, setEditMemberModal] = useState(false);
   const [deleteStoryModal, setDeleteStoryModal] = useState(false);
   const [signOutModal, setSignOutModal] = useState(false);
+  const [deleteMemberTarget, setDeleteMemberTarget] = useState<Member | null>(null);
   const [memberMode, setMemberMode] = useState<'guest' | 'invite'>('guest');
   const [joinModal, setJoinModal] = useState(false);
   const [joinCode, setJoinCode] = useState('');
@@ -789,6 +791,7 @@ function DongoApp() {
     if (editMemberModal) { setEditMemberModal(false); return true; }
     if (deleteStoryModal) { setDeleteStoryModal(false); return true; }
     if (signOutModal) { setSignOutModal(false); return true; }
+    if (deleteMemberTarget) { setDeleteMemberTarget(null); return true; }
     if (familyInfoModal) { setFamilyInfoModal(false); return true; }
     if (deleteExpenseTarget) { setDeleteExpenseTarget(null); return true; }
     if (pendingTransfer) { setPendingTransfer(null); return true; }
@@ -798,7 +801,7 @@ function DongoApp() {
   }
 
   const canGoBackInApp = storyModal || joinModal || storySwitcher || finishModal || notificationsModal
-    || expenseDetailsModal || expenseModal || memberModal || editMemberModal || deleteStoryModal || signOutModal
+    || expenseDetailsModal || expenseModal || memberModal || editMemberModal || deleteStoryModal || signOutModal || Boolean(deleteMemberTarget)
     || Boolean(pendingTransfer) || Boolean(deleteExpenseTarget) || familyInfoModal || tab !== 'home' || !storiesHome;
 
   useEffect(() => {
@@ -813,7 +816,7 @@ function DongoApp() {
       return true;
     });
     return () => subscription.remove();
-  }, [storyModal, storyStep, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, signOutModal, pendingTransfer, deleteExpenseTarget, familyInfoModal, tab, storiesHome]);
+  }, [storyModal, storyStep, joinModal, storySwitcher, finishModal, notificationsModal, expenseDetailsModal, expenseModal, memberModal, editMemberModal, deleteStoryModal, signOutModal, deleteMemberTarget, pendingTransfer, deleteExpenseTarget, familyInfoModal, tab, storiesHome]);
 
   useEffect(() => {
     if (!storyId) return;
@@ -1336,6 +1339,30 @@ function DongoApp() {
       showToast('اطلاعات عضو ویرایش شد');
     } catch (error) {
       showToast(friendlyError(error, 'ویرایش عضو ناموفق بود'));
+    } finally {
+      setCloudBusy(false);
+    }
+  }
+
+  async function removeGuestMember(member: Member) {
+    if (!storyId || cloudBusy) return;
+    if (isLocalWebPreview) {
+      setMembers((current) => current.filter((item) => item.id !== member.id));
+      setDeleteMemberTarget(null);
+      setEditMemberModal(false);
+      showToast(`${member.name} حذف شد`);
+      return;
+    }
+    setCloudBusy(true);
+    try {
+      await deleteOnlineGuest(member.id);
+      await syncFromCloud(storyId);
+      setDeleteMemberTarget(null);
+      setEditMemberModal(false);
+      showToast(`${member.name} از این ماجرا حذف شد`);
+    } catch (error) {
+      setDeleteMemberTarget(null);
+      showToast(friendlyError(error, 'حذف این نفر ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -2438,6 +2465,20 @@ function DongoApp() {
         </View>
       </Modal>
 
+      <Modal visible={Boolean(deleteMemberTarget)} animationType="fade" transparent onRequestClose={() => setDeleteMemberTarget(null)}>
+        <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
+          <View style={styles.finishDialog} accessibilityViewIsModal>
+            <View style={styles.deleteDialogIcon}><Trash2 size={27} color={C.debt} /></View>
+            <AppText style={styles.dialogTitle}>«{deleteMemberTarget?.name}» حذف شود؟</AppText>
+            <AppText style={styles.finishDialogText}>از این ماجرا بیرون می‌رود و دیگر در تقسیم خرج‌های بعدی حساب نمی‌شود. اگر در خرجی شرکت داشته باشد، اپ اجازه حذفش را نمی‌دهد.</AppText>
+            <View style={styles.dialogActions}>
+              <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setDeleteMemberTarget(null)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (deleteMemberTarget) void removeGuestMember(deleteMemberTarget); }}><Trash2 size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال حذف…' : 'بله، حذف کن'}</AppText></Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal visible={signOutModal} animationType="fade" transparent onRequestClose={() => setSignOutModal(false)}>
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
@@ -2478,11 +2519,17 @@ function DongoApp() {
         <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Pencil size={24} color={C.purple} /></View>
-            <AppText style={styles.dialogTitle}>ویرایش عضو</AppText>
-            <AppText style={styles.dialogText}>{editingMember?.kind === 'guest' ? 'نام حساب و تعداد نفرات نمایندگی‌شده را تغییر بده.' : 'نام این عضو از پروفایل خودش گرفته می‌شود؛ تعداد نفرات حساب را می‌توانی تغییر بدهی.'}</AppText>
-            <TextInput editable={editingMember?.kind === 'guest'} style={[styles.formInput, editingMember?.kind !== 'guest' && styles.readonlyInput]} value={editMemberName} onChangeText={setEditMemberName} placeholder="نام عضو" placeholderTextColor={C.faint} textAlign="right" />
+            <AppText style={styles.dialogTitle}>ویرایش این نفر</AppText>
+            <AppText style={styles.dialogText}>{editingMember?.kind === 'guest' ? 'اسم و تعداد نفراتش را می‌توانی عوض کنی.' : 'اسمش را خودش در حسابش تعیین می‌کند؛ فقط تعداد نفراتش را می‌توانی عوض کنی.'}</AppText>
+            <TextInput editable={editingMember?.kind === 'guest'} style={[styles.formInput, editingMember?.kind !== 'guest' && styles.readonlyInput]} value={editMemberName} onChangeText={setEditMemberName} placeholder="اسم این نفر" placeholderTextColor={C.faint} textAlign="right" />
             <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>روی هم چند نفرند؟</AppText><AppText style={styles.formHelper}>هر خرج مساوی بین همین تعداد تقسیم می‌شود؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={editMemberUnits ? faNumber.format(Number(editMemberUnits)) : ''} onChangeText={changeEditMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
-            {Number(editMemberUnits || 1) > 1 && <View style={styles.editFamilySection}><AppText style={styles.formLabelNoMargin}>چه کسانی با این حساب‌اند</AppText><AppText style={styles.formHelper}>نفر اول ثابت است؛ اسم بقیه را وارد کن.</AppText><View style={styles.editFamilyFixedRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.editFamilyFixedCopy}><AppText style={styles.familyInputLabel}>نفر ۱</AppText><AppText style={styles.editFamilyFixedName}>{editingMember?.kind === 'guest' ? editMemberName || 'این حساب' : editingMember?.householdMembers?.[0] || accountName.trim() || editingMember?.name || 'من'}</AppText></View></View><View style={styles.editFamilyInputsContent}>{editHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setEditHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
+            {Number(editMemberUnits || 1) > 1 && <View style={styles.editFamilySection}><AppText style={styles.formLabelNoMargin}>چه کسانی با این حساب‌اند</AppText><AppText style={styles.formHelper}>نفر اول ثابت است؛ اسم بقیه را وارد کن.</AppText><View style={styles.editFamilyFixedRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.editFamilyFixedCopy}><AppText style={styles.familyInputLabel}>نفر ۱</AppText><AppText style={styles.editFamilyFixedName}>{editingMember?.kind === 'guest' ? editMemberName || 'این حساب' : editingMember?.householdMembers?.[0] || accountName.trim() || editingMember?.name || 'من'}</AppText></View></View><View style={styles.editFamilyInputsContent}>{editHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>نفر {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setEditHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`اسم نفر ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
+            {editingMember?.kind === 'guest' && canManageGuests && (
+              <Pressable accessibilityRole="button" onPress={() => { if (editingMember) setDeleteMemberTarget(editingMember); }} style={styles.removeMemberButton}>
+                <Trash2 size={16} color={C.debt} />
+                <AppText style={styles.removeMemberText}>حذف این نفر از ماجرا</AppText>
+              </Pressable>
+            )}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setEditMemberModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
               <Pressable accessibilityRole="button" disabled={cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)} style={[styles.dialogAdd, (cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)) && styles.saveButtonDisabled]} onPress={saveMemberEdit}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>ذخیره تغییرات</AppText></Pressable>
@@ -2973,6 +3020,8 @@ const styles = StyleSheet.create({
   storyStepActions: { flexDirection: 'row-reverse', alignItems: 'stretch', gap: 9, marginTop: 18 },
   storyBackButton: { minHeight: 55, borderRadius: 18, borderWidth: 1, borderColor: C.line, backgroundColor: C.paper, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 13 },
   storyBackText: { fontFamily: F.bold, fontSize: 11, color: C.purple },
+  removeMemberButton: { width: '100%', minHeight: 44, borderRadius: 14, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 12, backgroundColor: C.debtPale },
+  removeMemberText: { fontFamily: F.bold, fontSize: 11, color: C.debt },
   loneMemberNotice: { borderRadius: 20, backgroundColor: C.purplePale, padding: 16, gap: 7, marginTop: 13 },
   loneMemberTitle: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
   loneMemberText: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 19, textAlign: 'right' },

@@ -20,6 +20,15 @@ export function friendlyError(error: unknown, fallback: string) {
   if (lower.includes('row-level security') || lower.includes('permission') || lower.includes('policy') || lower.includes('denied')) {
     return 'اجازه این کار را نداری؛ فقط سازنده ماجرا می‌تواند این تغییر را بدهد.';
   }
+  if (lower.includes('member has expenses')) {
+    return 'چون در بعضی خرج‌ها هست، نمی‌شود حذفش کرد. اول آن خرج‌ها را پاک یا ویرایش کن.';
+  }
+  if (lower.includes('member has settlements')) {
+    return 'چون تسویه‌ای به نامش ثبت شده، نمی‌شود حذفش کرد.';
+  }
+  if (lower.includes('only guest members can be removed')) {
+    return 'او خودش در اپ حساب دارد؛ حذفش از اینجا ممکن نیست.';
+  }
   if (lower.includes('duplicate') || lower.includes('unique')) {
     return 'این مورد از قبل ثبت شده است.';
   }

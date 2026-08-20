@@ -173,6 +173,12 @@ export async function updateOnlineMember(memberId: string, name: string, shareUn
   if (householdError) throw householdError;
 }
 
+export async function deleteOnlineGuest(memberId: string) {
+  if (!supabase) throw new Error('Supabase is not configured');
+  const { error } = await supabase.rpc('delete_guest_member', { target_member_id: memberId });
+  if (error) throw error;
+}
+
 export async function deleteOnlineStory(storyId: string) {
   if (!supabase) throw new Error('Supabase is not configured');
   const { error } = await supabase.rpc('delete_story', { target_story_id: storyId });

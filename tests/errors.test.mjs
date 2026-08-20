@@ -54,3 +54,18 @@ test('an empty or missing error still produces the caller\'s fallback', () => {
   assert.equal(friendlyError(undefined, FALLBACK), FALLBACK);
   assert.equal(friendlyError(new Error(''), FALLBACK), FALLBACK);
 });
+
+test('the three refusals from delete_guest_member explain themselves', () => {
+  const removeFallback = 'حذف این نفر ناموفق بود';
+  const withExpenses = friendlyError(new Error('Member has expenses'), removeFallback);
+  assert.match(withExpenses, /خرج‌ها/);
+  assertNoLatin(withExpenses);
+
+  const withSettlements = friendlyError(new Error('Member has settlements'), removeFallback);
+  assert.match(withSettlements, /تسویه/);
+  assertNoLatin(withSettlements);
+
+  const notAGuest = friendlyError(new Error('Only guest members can be removed'), removeFallback);
+  assert.match(notAGuest, /حساب دارد/);
+  assertNoLatin(notAGuest);
+});

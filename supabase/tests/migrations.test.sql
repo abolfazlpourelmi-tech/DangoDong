@@ -169,8 +169,83 @@ select pg_temp.denies($$
     '[{"member_id":"bbbbbbbb-0000-0000-0000-00000000000a","amount":50}]'::jsonb, 1)
 $$, 'an expense with no recorded author cannot be edited by anyone');
 
+-- ------------------------------------------------- removing a guest --
+-- A guest nobody has spent anything on can be taken back out again.
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+insert into public.story_members (id, story_id, user_id, member_kind, display_name)
+values ('bbbbbbbb-0000-0000-0000-00000000000d', 'aaaaaaaa-0000-0000-0000-000000000001', null, 'guest', 'اشتباهی');
+
+select public.delete_guest_member('bbbbbbbb-0000-0000-0000-00000000000d');
+select pg_temp.ok(
+  (select count(*) = 0 from public.story_members where id = 'bbbbbbbb-0000-0000-0000-00000000000d'),
+  'the story owner can remove a guest who has no expenses');
+
+-- By this point the fixture expense has been edited and deleted by the tests
+-- above, so a guest with a live share has to be built here rather than assumed.
+insert into public.story_members (id, story_id, user_id, member_kind, display_name)
+values ('bbbbbbbb-0000-0000-0000-00000000000f', 'aaaaaaaa-0000-0000-0000-000000000001', null, 'guest', 'مهمان خرج‌دار');
+
+insert into public.expenses (id, story_id, title, amount, category, paid_by, participant_person_count)
+values ('cccccccc-0000-0000-0000-00000000000f', 'aaaaaaaa-0000-0000-0000-000000000001', 'ناهار', 200, 'food', 'bbbbbbbb-0000-0000-0000-00000000000a', 2);
+
+insert into public.expense_shares (expense_id, member_id, amount) values
+  ('cccccccc-0000-0000-0000-00000000000f', 'bbbbbbbb-0000-0000-0000-00000000000a', 100),
+  ('cccccccc-0000-0000-0000-00000000000f', 'bbbbbbbb-0000-0000-0000-00000000000f', 100);
+
+-- Removing them would leave money allocated to a member that no longer exists.
+select pg_temp.denies(
+  $$select public.delete_guest_member('bbbbbbbb-0000-0000-0000-00000000000f')$$,
+  'a guest with a share in an expense cannot be removed');
+
+-- Same for a guest who paid for something, rather than owing for it.
+insert into public.story_members (id, story_id, user_id, member_kind, display_name)
+values ('bbbbbbbb-0000-0000-0000-000000000010', 'aaaaaaaa-0000-0000-0000-000000000001', null, 'guest', 'مهمان پرداخت‌کننده');
+
+insert into public.expenses (id, story_id, title, amount, category, paid_by, participant_person_count)
+values ('cccccccc-0000-0000-0000-000000000010', 'aaaaaaaa-0000-0000-0000-000000000001', 'بنزین', 80, 'transport', 'bbbbbbbb-0000-0000-0000-000000000010', 1);
+
+select pg_temp.denies(
+  $$select public.delete_guest_member('bbbbbbbb-0000-0000-0000-000000000010')$$,
+  'a guest who paid for an expense cannot be removed');
+
+-- And for a guest who already appears in a recorded settlement.
+insert into public.story_members (id, story_id, user_id, member_kind, display_name)
+values ('bbbbbbbb-0000-0000-0000-000000000011', 'aaaaaaaa-0000-0000-0000-000000000001', null, 'guest', 'مهمان تسویه‌شده');
+
+insert into public.settlements (story_id, from_member_id, to_member_id, amount)
+values ('aaaaaaaa-0000-0000-0000-000000000001', 'bbbbbbbb-0000-0000-0000-000000000011', 'bbbbbbbb-0000-0000-0000-00000000000a', 40);
+
+select pg_temp.denies(
+  $$select public.delete_guest_member('bbbbbbbb-0000-0000-0000-000000000011')$$,
+  'a guest who appears in a settlement cannot be removed');
+
+select pg_temp.denies(
+  $$select public.delete_guest_member('bbbbbbbb-0000-0000-0000-00000000000b')$$,
+  'a member who is a real account holder cannot be removed this way');
+
+-- Someone in the story who does not own it.
+set request.jwt.claim.sub = '22222222-2222-2222-2222-222222222222';
+insert into public.story_members (id, story_id, user_id, member_kind, display_name)
+values ('bbbbbbbb-0000-0000-0000-00000000000e', 'aaaaaaaa-0000-0000-0000-000000000001', null, 'guest', 'مهمان دوم');
+
+select pg_temp.denies(
+  $$select public.delete_guest_member('bbbbbbbb-0000-0000-0000-00000000000e')$$,
+  'a member who does not own the story cannot remove a guest');
+
+-- A closed story is a record, not a working document.
+set request.jwt.claim.sub = '11111111-1111-1111-1111-111111111111';
+update public.stories set status = 'completed' where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+select pg_temp.denies(
+  $$select public.delete_guest_member('bbbbbbbb-0000-0000-0000-00000000000e')$$,
+  'a guest cannot be removed from a story that has been closed');
+update public.stories set status = 'active' where id = 'aaaaaaaa-0000-0000-0000-000000000001';
+
 -- ----------------------------------------------------------- signed out --
 set request.jwt.claim.sub = '';
 select pg_temp.denies(
   $$select * from public.story_member_cards('aaaaaaaa-0000-0000-0000-000000000001')$$,
   'an unauthenticated caller is refused');
+
+select pg_temp.denies(
+  $$select public.delete_guest_member('bbbbbbbb-0000-0000-0000-00000000000e')$$,
+  'an unauthenticated caller cannot remove a guest');
