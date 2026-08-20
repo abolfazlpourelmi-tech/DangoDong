@@ -363,6 +363,7 @@ function DongoApp() {
   const [joinCode, setJoinCode] = useState('');
   const [joinUnits, setJoinUnits] = useState('1');
   const [joinHouseholdNameInputs, setJoinHouseholdNameInputs] = useState<string[]>([]);
+  const [joinFamilyOpen, setJoinFamilyOpen] = useState(false);
   const [cloudBusy, setCloudBusy] = useState(false);
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
@@ -1361,6 +1362,14 @@ function DongoApp() {
     }
   }
 
+  function openJoinModal() {
+    setJoinCode('');
+    setJoinUnits('1');
+    setJoinHouseholdNameInputs([]);
+    setJoinFamilyOpen(false);
+    setJoinModal(true);
+  }
+
   async function joinStory() {
     const code = joinCode.trim().toUpperCase();
     const shareUnits = Math.min(12, Math.max(1, Number(joinUnits || 1)));
@@ -1373,6 +1382,7 @@ function DongoApp() {
       setJoinCode('');
       setJoinUnits('1');
       setJoinHouseholdNameInputs([]);
+      setJoinFamilyOpen(false);
       setJoinModal(false);
       showToast('با موفقیت به ماجرا پیوستی');
     } catch (error) {
@@ -1438,7 +1448,11 @@ function DongoApp() {
         <View style={[styles.dashboardStoryEmoji, completed && styles.dashboardStoryEmojiCompleted]}><AppText style={styles.dashboardStoryEmojiText}>{template.emoji}</AppText></View>
         <View style={styles.dashboardStoryCopy}>
           <View style={styles.dashboardStoryTitleRow}>{completed && <View style={styles.completedBadge}><Check size={11} color={C.mintDark} /><AppText style={styles.completedBadgeText}>تمام‌شده</AppText></View>}<AppText style={styles.dashboardStoryTitle}>{story.name}</AppText></View>
-          <AppText style={styles.dashboardStoryMeta}>{faNumber.format(peopleCount)} نفر · {faNumber.format(story.members.length)} نماینده · {faNumber.format(story.expenses.length)} هزینه</AppText>
+          {/* "۱ نماینده" was the data model talking. The account count only says
+              anything once it differs from the head count. */}
+          <AppText style={styles.dashboardStoryMeta}>{peopleCount === story.members.length
+            ? `${faNumber.format(peopleCount)} نفر · ${faNumber.format(story.expenses.length)} خرج`
+            : `${faNumber.format(peopleCount)} نفر در ${faNumber.format(story.members.length)} حساب · ${faNumber.format(story.expenses.length)} خرج`}</AppText>
           <AppText style={styles.dashboardStoryTotal}>{formatMoney(storyTotal)}</AppText>
         </View>
         <ChevronLeft size={20} color={completed ? C.faint : C.purple} />
@@ -1620,18 +1634,22 @@ function DongoApp() {
       <>
         <View style={styles.dashboardHero}>
           <View style={styles.dashboardHeroIcon}><WalletCards size={27} color={C.purple} /></View>
-          <View style={styles.dashboardHeroCopy}><AppText style={styles.dashboardEyebrow}>همه‌چیز یک‌جا</AppText><AppText style={styles.dashboardTitle}>ماجراهای من</AppText><AppText style={styles.dashboardText}>ماجراهای در جریان را ادامه بده یا حساب ماجراهای قبلی را مرور کن.</AppText></View>
+          <View style={styles.dashboardHeroCopy}><AppText style={styles.dashboardEyebrow}>ماجراهای من</AppText><AppText style={styles.dashboardTitle}>{faNumber.format(ongoing.length)} ماجرای در جریان</AppText><AppText style={styles.dashboardText}>یکی را باز کن تا خرج‌ها و حسابش را ببینی.</AppText></View>
         </View>
         <View style={styles.dashboardActions}>
           <Pressable accessibilityRole="button" onPress={openNewStory} style={styles.dashboardNewStory}><Plus size={19} color="#FFFFFF" /><AppText style={styles.dashboardNewStoryText}>ساخت ماجرای جدید</AppText></Pressable>
-          <Pressable accessibilityRole="button" onPress={() => setJoinModal(true)} style={styles.dashboardJoinStory}><UserPlus size={18} color={C.purple} /><AppText style={styles.dashboardJoinStoryText}>پیوستن با کد</AppText></Pressable>
+          <Pressable accessibilityRole="button" onPress={openJoinModal} style={styles.dashboardJoinStory}><UserPlus size={18} color={C.purple} /><AppText style={styles.dashboardJoinStoryText}>پیوستن با کد</AppText></Pressable>
         </View>
 
         <View style={styles.dashboardSectionHead}><View style={styles.ongoingCount}><AppText style={styles.ongoingCountText}>{faNumber.format(ongoing.length)}</AppText></View><AppText style={styles.sectionTitle}>ماجراهای در جریان</AppText></View>
-        <View style={styles.dashboardStoryList}>{ongoing.length ? ongoing.map(renderStoryCard) : <View style={styles.inlineEmpty}><AppText style={styles.inlineEmptyTitle}>ماجرای بازی نداری</AppText><AppText style={styles.inlineEmptyText}>یک ماجرای تازه بساز و دنگ‌ها را ثبت کن.</AppText></View>}</View>
+        <View style={styles.dashboardStoryList}>{ongoing.length ? ongoing.map(renderStoryCard) : <View style={styles.inlineEmpty}><AppText style={styles.inlineEmptyTitle}>ماجرای در جریانی نداری</AppText><AppText style={styles.inlineEmptyText}>یک ماجرای تازه بساز و خرج‌ها را ثبت کن.</AppText></View>}</View>
 
-        <View style={styles.dashboardSectionHead}><View style={styles.completedCount}><AppText style={styles.completedCountText}>{faNumber.format(completed.length)}</AppText></View><AppText style={styles.sectionTitle}>ماجراهای تمام‌شده</AppText></View>
-        <View style={styles.dashboardStoryList}>{completed.length ? completed.map(renderStoryCard) : <View style={styles.inlineEmpty}><AppText style={styles.inlineEmptyTitle}>هنوز ماجرایی تمام نشده</AppText><AppText style={styles.inlineEmptyText}>بعد از تسویه، ماجراهای بسته‌شده اینجا می‌مانند.</AppText></View>}</View>
+        {completed.length > 0 && (
+          <>
+            <View style={styles.dashboardSectionHead}><View style={styles.completedCount}><AppText style={styles.completedCountText}>{faNumber.format(completed.length)}</AppText></View><AppText style={styles.sectionTitle}>ماجراهای تمام‌شده</AppText></View>
+            <View style={styles.dashboardStoryList}>{completed.map(renderStoryCard)}</View>
+          </>
+        )}
       </>
     );
   }
@@ -2111,7 +2129,7 @@ function DongoApp() {
             <Plus size={21} color="#FFFFFF" />
             <AppText style={styles.primaryStoryButtonText}>ساخت ماجرای جدید</AppText>
           </Pressable>
-          <Pressable accessibilityRole="button" style={styles.secondaryStoryButton} onPress={() => setJoinModal(true)}>
+          <Pressable accessibilityRole="button" style={styles.secondaryStoryButton} onPress={openJoinModal}>
             <UserPlus size={20} color={C.purple} />
             <AppText style={styles.secondaryStoryButtonText}>با کد دعوت به ماجرا بپیوند</AppText>
           </Pressable>
@@ -2150,8 +2168,16 @@ function DongoApp() {
               <AppText style={styles.dialogTitle}>پیوستن به ماجرا</AppText>
               <AppText style={styles.dialogText}>کدی را که سازنده ماجرا برایت فرستاده وارد کن.</AppText>
               <TextInput autoCapitalize="characters" autoCorrect={false} maxLength={8} style={[styles.formInput, styles.joinCodeInput]} value={joinCode} onChangeText={(value) => setJoinCode(value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())} placeholder="کد ۸ کاراکتری" placeholderTextColor={C.faint} textAlign="center" autoFocus />
-              <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب تو هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits ? faNumber.format(Number(joinUnits)) : ''} onChangeText={(value) => { const normalized = normalizeDigits(value).replace(/^0+/, '').slice(0, 2); const count = Math.min(12, Math.max(1, Number(normalized || 1))); setJoinUnits(normalized); setJoinHouseholdNameInputs((current) => Array.from({ length: count - 1 }, (_, index) => current[index] ?? '')); }} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
-              {joinHouseholdNameInputs.map((value, index) => <View key={`join-home-${index}`} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setJoinHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
+              {joinFamilyOpen || joinHouseholdNameInputs.length > 0 ? (
+                <>
+                  <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>روی هم چند نفرید؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits ? faNumber.format(Number(joinUnits)) : ''} onChangeText={(value) => { const normalized = normalizeDigits(value).replace(/^0+/, '').slice(0, 2); const count = Math.min(12, Math.max(1, Number(normalized || 1))); setJoinUnits(normalized); setJoinHouseholdNameInputs((current) => Array.from({ length: count - 1 }, (_, index) => current[index] ?? '')); }} placeholder="۲" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+                  {joinHouseholdNameInputs.map((value, index) => <View key={`join-home-${index}`} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>نفر {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setJoinHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`اسم نفر ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
+                </>
+              ) : (
+                <Pressable accessibilityRole="button" onPress={() => { setJoinFamilyOpen(true); setJoinUnits('2'); setJoinHouseholdNameInputs(['']); }} style={styles.splitDisclosure}>
+                  <AppText style={styles.splitDisclosureText}>با خانواده‌ات می‌آیی؟</AppText>
+                </Pressable>
+              )}
               <View style={styles.dialogActions}>
                 <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setJoinModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
                 <Pressable accessibilityRole="button" disabled={!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><UserPlus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>پیوستن</AppText></Pressable>
@@ -2240,7 +2266,7 @@ function DongoApp() {
                 return (
                   <Pressable key={story.id} accessibilityRole="button" accessibilityState={{ selected: active }} onPress={() => switchStory(story)} style={[styles.storyListItem, active && styles.storyListItemActive]}>
                     <View style={styles.storyListEmoji}><AppText style={styles.storyTemplateEmoji}>{template.emoji}</AppText></View>
-                    <View style={styles.storyListCopy}><View style={styles.storyListNameRow}>{active && <View style={styles.activeStoryBadge}><AppText style={styles.activeStoryBadgeText}>فعال</AppText></View>}<AppText style={styles.storyListName}>{story.name}</AppText></View><AppText style={styles.storyListMeta}>{faNumber.format(peopleCount)} نفر · {faNumber.format(story.members.length)} نماینده · {faNumber.format(story.expenses.length)} هزینه · {formatMoney(storyTotal)}</AppText></View>
+                    <View style={styles.storyListCopy}><View style={styles.storyListNameRow}>{active && <View style={styles.activeStoryBadge}><AppText style={styles.activeStoryBadgeText}>فعال</AppText></View>}<AppText style={styles.storyListName}>{story.name}</AppText></View><AppText style={styles.storyListMeta}>{faNumber.format(peopleCount)} نفر · {faNumber.format(story.expenses.length)} خرج · {formatMoney(storyTotal)}</AppText></View>
                     <ChevronLeft size={19} color={active ? C.purple : C.faint} />
                   </Pressable>
                 );
@@ -2256,7 +2282,7 @@ function DongoApp() {
           <View style={styles.notificationsCard} accessibilityViewIsModal>
             <View style={styles.switcherHeader}>
               <Pressable accessibilityRole="button" accessibilityLabel="بستن اعلان‌ها" style={styles.sheetClose} onPress={() => setNotificationsModal(false)}><X size={20} color={C.ink} /></Pressable>
-              <View style={styles.switcherHeaderCopy}><AppText style={styles.dialogTitle}>اعلان‌های مالی</AppText><AppText style={styles.dialogTextCompact}>طلب‌ها و بدهی‌های تو در همه ماجراها</AppText></View>
+              <View style={styles.switcherHeaderCopy}><AppText style={styles.dialogTitle}>طلب‌ها و بدهی‌ها</AppText><AppText style={styles.dialogTextCompact}>در همهٔ ماجراهای تو</AppText></View>
               <View style={styles.notificationHeaderIcon}><Bell size={21} color={C.purple} /></View>
             </View>
             <ScrollView style={styles.notificationsList} contentContainerStyle={styles.notificationsListContent} showsVerticalScrollIndicator={false}>
@@ -2271,7 +2297,7 @@ function DongoApp() {
                   <ChevronLeft size={18} color={C.faint} />
                 </Pressable>
               )) : (
-                <View style={styles.notificationsEmpty}><Image source={require('./assets/dong-mascot-optimized.png')} style={styles.notificationsEmptyMascot} resizeMode="contain" /><AppText style={styles.emptyTitle}>اعلان مالی نداری</AppText><AppText style={styles.emptyText}>فعلاً نه بدهکاری و نه طلبی برای تو ثبت شده.</AppText></View>
+                <View style={styles.notificationsEmpty}><Image source={require('./assets/dong-mascot-optimized.png')} style={styles.notificationsEmptyMascot} resizeMode="contain" /><AppText style={styles.emptyTitle}>حسابت با همه صاف است</AppText><AppText style={styles.emptyText}>نه به کسی بدهکاری، نه از کسی طلب داری.</AppText></View>
               )}
             </ScrollView>
           </View>
@@ -2287,8 +2313,8 @@ function DongoApp() {
               <CategoryBadge category={selectedExpense?.category} size={45} />
             </View>
             {selectedExpense && <>
-              <View style={styles.expenseDetailsTotal}><AppText style={styles.expenseDetailsTotalLabel}>مبلغ کل</AppText><AppText style={styles.expenseDetailsTotalValue}>{formatMoney(selectedExpense.amount)}</AppText></View>
-              <AppText style={styles.expenseDetailsSectionTitle}>سهم حساب‌ها</AppText>
+              <View style={styles.expenseDetailsTotal}><AppText style={styles.expenseDetailsTotalLabel}>کل این خرج</AppText><AppText style={styles.expenseDetailsTotalValue}>{formatMoney(selectedExpense.amount)}</AppText></View>
+              <AppText style={styles.expenseDetailsSectionTitle}>سهم هر نفر</AppText>
               <ScrollView style={styles.expenseAllocationsList} contentContainerStyle={styles.expenseAllocationsContent}>
                 {(selectedExpense.allocations ?? []).map((allocation) => {
                   const member = memberById(allocation.memberId);
@@ -2304,12 +2330,12 @@ function DongoApp() {
               {canEditExpense(selectedExpense) ? (
                 <View style={styles.expenseOwnerActions}>
                   <Pressable accessibilityRole="button" disabled={cloudBusy} style={[styles.expenseDeleteButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => setDeleteExpenseTarget(selectedExpense)}><Trash2 size={17} color={C.debt} /><AppText style={styles.expenseDeleteText}>حذف</AppText></Pressable>
-                  <Pressable accessibilityRole="button" disabled={cloudBusy} style={[styles.expenseEditButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => openExpenseEditor(selectedExpense)}><Pencil size={17} color="#FFFFFF" /><AppText style={styles.expenseEditText}>ویرایش هزینه</AppText></Pressable>
+                  <Pressable accessibilityRole="button" disabled={cloudBusy} style={[styles.expenseEditButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => openExpenseEditor(selectedExpense)}><Pencil size={17} color="#FFFFFF" /><AppText style={styles.expenseEditText}>ویرایش</AppText></Pressable>
                 </View>
               ) : selectedExpense.createdById ? (
                 <AppText style={styles.expenseOwnerHint}>فقط {expenseAuthorName(selectedExpense)} می‌تواند این هزینه را ویرایش یا حذف کند.</AppText>
               ) : null}
-              <Pressable accessibilityRole="button" style={styles.expenseDetailsCloseButton} onPress={() => setExpenseDetailsModal(false)}><AppText style={styles.expenseDetailsCloseText}>متوجه شدم</AppText></Pressable>
+              <Pressable accessibilityRole="button" style={styles.expenseDetailsCloseButton} onPress={() => setExpenseDetailsModal(false)}><AppText style={styles.expenseDetailsCloseText}>بستن</AppText></Pressable>
             </>}
           </View>
         </View>
@@ -2346,9 +2372,9 @@ function DongoApp() {
             <AppText style={styles.dialogTitle}>ماجرا تموم شد؟</AppText>
             <AppText style={styles.finishDialogText}>بعد از اتمام، «{storyName}» به بخش ماجراهای تمام‌شده می‌رود و هزینه جدیدی به آن اضافه نمی‌شود.</AppText>
             <View style={styles.finishSummaryRow}>
-              <View style={styles.finishSummaryItem}><AppText style={styles.finishSummaryLabel}>کل هزینه</AppText><AppText style={styles.finishSummaryValue}>{formatMoney(total)}</AppText></View>
+              <View style={styles.finishSummaryItem}><AppText style={styles.finishSummaryLabel}>کل خرج</AppText><AppText style={styles.finishSummaryValue}>{formatMoney(total)}</AppText></View>
               <View style={styles.finishSummaryDivider} />
-              <View style={styles.finishSummaryItem}><AppText style={styles.finishSummaryLabel}>انتقال باقی‌مانده</AppText><AppText style={styles.finishSummaryValue}>{faNumber.format(transfers.length)} انتقال</AppText></View>
+              <View style={styles.finishSummaryItem}><AppText style={styles.finishSummaryLabel}>پرداخت مانده</AppText><AppText style={styles.finishSummaryValue}>{faNumber.format(transfers.length)} پرداخت</AppText></View>
             </View>
             {transfers.length > 0 && <View style={styles.finishWarning}><AppText style={styles.finishWarningText}>تسویه‌ها هنوز باقی مانده‌اند؛ بعداً هم می‌توانی آن‌ها را از صفحه تسویه ببینی.</AppText></View>}
             <View style={styles.dialogActions}>
@@ -2419,8 +2445,8 @@ function DongoApp() {
             <AppText style={styles.dialogTitle}>ویرایش عضو</AppText>
             <AppText style={styles.dialogText}>{editingMember?.kind === 'guest' ? 'نام حساب و تعداد نفرات نمایندگی‌شده را تغییر بده.' : 'نام این عضو از پروفایل خودش گرفته می‌شود؛ تعداد نفرات حساب را می‌توانی تغییر بدهی.'}</AppText>
             <TextInput editable={editingMember?.kind === 'guest'} style={[styles.formInput, editingMember?.kind !== 'guest' && styles.readonlyInput]} value={editMemberName} onChangeText={setEditMemberName} placeholder="نام عضو" placeholderTextColor={C.faint} textAlign="right" />
-            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>تعداد نفرات این حساب</AppText><AppText style={styles.formHelper}>مبنای تقسیم مساوی هزینه‌های بعدی؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={editMemberUnits ? faNumber.format(Number(editMemberUnits)) : ''} onChangeText={changeEditMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
-            {Number(editMemberUnits || 1) > 1 && <View style={styles.editFamilySection}><AppText style={styles.formLabelNoMargin}>اعضای این حساب</AppText><AppText style={styles.formHelper}>عضو ۱ سرپرست ثابت است؛ نام بقیه اعضا را جدا وارد کن.</AppText><View style={styles.editFamilyFixedRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.editFamilyFixedCopy}><AppText style={styles.familyInputLabel}>عضو ۱ · سرپرست</AppText><AppText style={styles.editFamilyFixedName}>{editingMember?.kind === 'guest' ? editMemberName || 'سرپرست حساب' : editingMember?.householdMembers?.[0] || accountName.trim() || editingMember?.name || 'من'}</AppText></View></View><View style={styles.editFamilyInputsContent}>{editHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setEditHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
+            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>روی هم چند نفرند؟</AppText><AppText style={styles.formHelper}>هر خرج مساوی بین همین تعداد تقسیم می‌شود؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={editMemberUnits ? faNumber.format(Number(editMemberUnits)) : ''} onChangeText={changeEditMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+            {Number(editMemberUnits || 1) > 1 && <View style={styles.editFamilySection}><AppText style={styles.formLabelNoMargin}>چه کسانی با این حساب‌اند</AppText><AppText style={styles.formHelper}>نفر اول ثابت است؛ اسم بقیه را وارد کن.</AppText><View style={styles.editFamilyFixedRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.editFamilyFixedCopy}><AppText style={styles.familyInputLabel}>نفر ۱</AppText><AppText style={styles.editFamilyFixedName}>{editingMember?.kind === 'guest' ? editMemberName || 'این حساب' : editingMember?.householdMembers?.[0] || accountName.trim() || editingMember?.name || 'من'}</AppText></View></View><View style={styles.editFamilyInputsContent}>{editHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setEditHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setEditMemberModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
               <Pressable accessibilityRole="button" disabled={cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)} style={[styles.dialogAdd, (cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)) && styles.saveButtonDisabled]} onPress={saveMemberEdit}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>ذخیره تغییرات</AppText></Pressable>
@@ -2608,8 +2634,16 @@ function DongoApp() {
             <AppText style={styles.dialogTitle}>پیوستن به ماجرا</AppText>
             <AppText style={styles.dialogText}>کدی را که سازنده ماجرا برایت فرستاده وارد کن.</AppText>
             <TextInput autoCapitalize="characters" autoCorrect={false} maxLength={8} style={[styles.formInput, styles.joinCodeInput]} value={joinCode} onChangeText={(value) => setJoinCode(value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase())} placeholder="کد ۸ کاراکتری" placeholderTextColor={C.faint} textAlign="center" autoFocus />
-            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>چند نفر با حساب تو هستند؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits ? faNumber.format(Number(joinUnits)) : ''} onChangeText={(value) => { const normalized = normalizeDigits(value).replace(/^0+/, '').slice(0, 2); const count = Math.min(12, Math.max(1, Number(normalized || 1))); setJoinUnits(normalized); setJoinHouseholdNameInputs((current) => Array.from({ length: count - 1 }, (_, index) => current[index] ?? '')); }} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
-            {joinHouseholdNameInputs.map((value, index) => <View key={`join-story-${index}`} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setJoinHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
+            {joinFamilyOpen || joinHouseholdNameInputs.length > 0 ? (
+              <>
+                <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>روی هم چند نفرید؟</AppText><AppText style={styles.formHelper}>شامل خودت؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات حساب" style={styles.memberUnitsInput} value={joinUnits ? faNumber.format(Number(joinUnits)) : ''} onChangeText={(value) => { const normalized = normalizeDigits(value).replace(/^0+/, '').slice(0, 2); const count = Math.min(12, Math.max(1, Number(normalized || 1))); setJoinUnits(normalized); setJoinHouseholdNameInputs((current) => Array.from({ length: count - 1 }, (_, index) => current[index] ?? '')); }} placeholder="۲" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
+                {joinHouseholdNameInputs.map((value, index) => <View key={`join-story-${index}`} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>نفر {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setJoinHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`اسم نفر ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
+              </>
+            ) : (
+              <Pressable accessibilityRole="button" onPress={() => { setJoinFamilyOpen(true); setJoinUnits('2'); setJoinHouseholdNameInputs(['']); }} style={styles.splitDisclosure}>
+                <AppText style={styles.splitDisclosureText}>با خانواده‌ات می‌آیی؟</AppText>
+              </Pressable>
+            )}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setJoinModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
               <Pressable accessibilityRole="button" disabled={!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><UserPlus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>پیوستن</AppText></Pressable>
