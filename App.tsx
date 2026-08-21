@@ -1666,7 +1666,7 @@ function DongoApp() {
 
         <AppText style={styles.peopleIntroText}>{splitByFamily
           ? 'برای هر خانواده، اسم سرپرست را بنویس — کسی که آخرش تسویه می‌کند — و زیرش بقیهٔ خانواده را. سهم هر نفر جدا حساب می‌شود، ولی یک مبلغ با سرپرست تسویه می‌شود.'
-          : 'اسم همه را بنویس. سهم هر نفر جدا حساب می‌شود و هر کس دنگ خودش را می‌دهد.'}</AppText>
+          : 'اسم همه را بنویس. بعد از ساخت ماجرا می‌توانی با کد دعوت، هر کدام را که اپ دارد هم به ماجرا بیاوری.'}</AppText>
 
         <View style={styles.peopleList}>
           <View style={[styles.peopleCard, styles.peopleCardSelf]}>
@@ -2000,11 +2000,17 @@ function DongoApp() {
         {members.length === 1 && !storyCompleted && (
           <View style={styles.loneMemberNotice}>
             <AppText style={styles.loneMemberTitle}>فعلاً فقط خودت توی این ماجرایی</AppText>
-            <AppText style={styles.loneMemberText}>اسم بقیه را اضافه کن تا دنگ بین همه تقسیم شود. لازم نیست اپ داشته باشند؛ حسابشان دست توست.</AppText>
-            <Pressable accessibilityRole="button" onPress={openNewMemberModal} style={styles.loneMemberButton}>
-              <UserPlus size={17} color="#FFFFFF" />
-              <AppText style={styles.loneMemberButtonText}>افزودن همراه‌ها</AppText>
-            </Pressable>
+            <AppText style={styles.loneMemberText}>بقیه را دعوت کن به این ماجرا تا دنگ بین همه تقسیم شود. هر کس اپ ندارد، خودت اسمش را ثبت کن.</AppText>
+            <View style={styles.loneMemberActions}>
+              <Pressable accessibilityRole="button" onPress={() => { openNewMemberModal(); setMemberMode('invite'); }} style={styles.loneMemberButton}>
+                <UserPlus size={17} color="#FFFFFF" />
+                <AppText style={styles.loneMemberButtonText}>دعوت با کد</AppText>
+              </Pressable>
+              <Pressable accessibilityRole="button" onPress={openNewMemberModal} style={styles.loneMemberSecondary}>
+                <Plus size={16} color={C.purple} />
+                <AppText style={styles.loneMemberSecondaryText}>خودم ثبت می‌کنم</AppText>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -2243,7 +2249,7 @@ function DongoApp() {
           <View style={styles.welcomeCopy}>
             <AppText style={styles.welcomeTitle}>هنوز هیچ ماجرایی نساختی</AppText>
             <AppText style={styles.welcomeText}>هر شام و سفر و خرید مشترکی که خرجش را با هم حساب می‌کنید، اینجا یک «ماجرا» است.</AppText>
-            <AppText style={styles.welcomeText}>یکی بساز و اسم بقیه را بنویس. لازم نیست اپ داشته باشند؛ حساب همه دست توست.</AppText>
+            <AppText style={styles.welcomeText}>یک ماجرا بساز و بقیه را دعوت کن. هر کس هم اپ ندارد، خودت اسمش را ثبت کن.</AppText>
           </View>
           <Pressable accessibilityRole="button" style={styles.primaryStoryButton} onPress={openNewStory}>
             <Plus size={21} color="#FFFFFF" />
@@ -2793,12 +2799,12 @@ function DongoApp() {
             <View style={styles.dialogIcon}><Users size={26} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>یک نفر دیگر</AppText>
             <View style={styles.memberModeTabs}>
-              <Pressable disabled={!canManageGuests} onPress={() => setMemberMode('guest')} style={[styles.memberModeTab, memberMode === 'guest' && styles.memberModeTabActive, !canManageGuests && styles.memberModeTabDisabled]}><AppText style={memberMode === 'guest' ? styles.memberModeTabTextActive : styles.memberModeTabText}>خودم اضافه می‌کنم</AppText></Pressable>
+              <Pressable disabled={!canManageGuests} onPress={() => setMemberMode('guest')} style={[styles.memberModeTab, memberMode === 'guest' && styles.memberModeTabActive, !canManageGuests && styles.memberModeTabDisabled]}><AppText style={memberMode === 'guest' ? styles.memberModeTabTextActive : styles.memberModeTabText}>خودم ثبتش می‌کنم</AppText></Pressable>
               <Pressable onPress={() => setMemberMode('invite')} style={[styles.memberModeTab, memberMode === 'invite' && styles.memberModeTabActive]}><AppText style={memberMode === 'invite' ? styles.memberModeTabTextActive : styles.memberModeTabText}>دعوتش می‌کنم</AppText></Pressable>
             </View>
             {memberMode === 'guest' ? (
               <>
-                <AppText style={styles.dialogText}>اسم کسی که می‌خواهی اضافه کنی. لازم نیست اپ داشته باشد.</AppText>
+                <AppText style={styles.dialogText}>اگر اپ ندارد، خودت اسمش را ثبت کن. هر وقت خواست، با کد دعوت خودش وارد می‌شود.</AppText>
                 <TextInput accessibilityLabel="اسم عضو جدید" style={styles.formInput} value={newMemberName} onChangeText={setNewMemberName} placeholder="مثلاً رضا" placeholderTextColor={C.faint} textAlign="right" autoFocus />
                 {newMemberFamilyOpen || Number(newMemberUnits || 1) > 1 ? (
                   <>
@@ -3155,7 +3161,10 @@ const styles = StyleSheet.create({
   loneMemberNotice: { borderRadius: 20, backgroundColor: C.purplePale, padding: 16, gap: 7, marginTop: 13 },
   loneMemberTitle: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
   loneMemberText: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 19, textAlign: 'right' },
-  loneMemberButton: { minHeight: 48, borderRadius: 16, backgroundColor: C.purple, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 4 },
+  loneMemberActions: { flexDirection: 'row-reverse', gap: 8, marginTop: 4 },
+  loneMemberButton: { flex: 1, minHeight: 48, borderRadius: 16, backgroundColor: C.purple, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  loneMemberSecondary: { flex: 1, minHeight: 48, borderRadius: 16, backgroundColor: C.paper, borderWidth: 1.5, borderColor: '#D7CEF8', flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  loneMemberSecondaryText: { fontFamily: F.bold, fontSize: 11, color: C.purple },
   loneMemberButtonText: { fontFamily: F.bold, fontSize: 12, color: '#FFFFFF' },
   inlineEmpty: { padding: 22, borderRadius: 23, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, alignItems: 'center' },
   inlineEmptyTitle: { fontFamily: F.extra, fontSize: 15 },
