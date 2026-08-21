@@ -334,13 +334,7 @@ function DongoApp() {
   const [expenseDetailsModal, setExpenseDetailsModal] = useState(false);
   const [storiesHome, setStoriesHome] = useState(false);
   const [newStoryName, setNewStoryName] = useState('');
-  const [newOwnerUnits, setNewOwnerUnits] = useState('1');
-  // Users read "چند نفر با حساب من هستند؟" as "how many people are on this
-  // outing" and put their friends there, when it means "whose share do I pay".
-  // The choice is explicit now, and defaults to the common case.
-  const [newOwnerIsFamily, setNewOwnerIsFamily] = useState(false);
   const [familyInfoModal, setFamilyInfoModal] = useState(false);
-  const [ownerFamilyNames, setOwnerFamilyNames] = useState<string[]>([]);
   // Creating a story used to produce a story of one, and the only way to add
   // the other people was a small text button on the home screen afterwards.
   // Testers read "ماجرای جدید" as "set up this outing" and expected to list
@@ -934,26 +928,6 @@ function DongoApp() {
     setStoryStep(2);
   }
 
-  /** Keeps the household name inputs in step with the household size. */
-  function changeOwnerUnits(value: string) {
-    const units = Math.min(12, Number(normalizeDigits(value).replace(/^0+/, '') || 0));
-    setNewOwnerUnits(units ? String(units) : '');
-    setOwnerFamilyNames((current) => Array.from({ length: Math.max(0, units - 1) }, (_, index) => current[index] ?? ''));
-  }
-
-  function chooseOwnerScope(isFamily: boolean) {
-    setNewOwnerIsFamily(isFamily);
-    if (!isFamily) {
-      setNewOwnerUnits('1');
-      setOwnerFamilyNames([]);
-      return;
-    }
-    // Choosing "خانواده" means at least two people, whatever the box says.
-    setNewOwnerUnits('2');
-    setOwnerFamilyNames((current) => [current[0] ?? '']);
-    setFamilyInfoModal(true);
-  }
-
   function changeCompanionName(index: number, value: string) {
     setNewCompanionNames((current) => current.map((item, itemIndex) => (itemIndex === index ? value : item)));
   }
@@ -964,9 +938,6 @@ function DongoApp() {
 
   function resetStoryDraft() {
     setNewStoryName('');
-    setNewOwnerUnits('1');
-    setNewOwnerIsFamily(false);
-    setOwnerFamilyNames([]);
     setNewCompanionNames([]);
     setStoryStep(1);
   }
@@ -974,12 +945,13 @@ function DongoApp() {
   async function createStory() {
     const name = newStoryName.trim();
     if (!name || cloudBusy) return;
-    const ownerUnits = Math.min(12, Math.max(newOwnerIsFamily ? 2 : 1, Number(newOwnerUnits || 1)));
-    const cleanFamilyNames = ownerFamilyNames.map((item) => item.trim());
-    if (ownerUnits > 1 && (cleanFamilyNames.length !== ownerUnits - 1 || cleanFamilyNames.some((item) => item.length < 2))) {
-      showToast('نام همه اعضای خانواده را وارد کن.');
-      return;
-    }
+    // Testing found that asking, at creation time, whether the story owner is
+    // "فقط خودم" or "من و خانواده‌ام" stopped ten readers out of ten: it asks
+    // people to model the app's records before they have used it once. Everyone
+    // is one person here now, and the several-people-on-one-account idea lives
+    // only where it can be discovered later — on a member's own card.
+    const ownerUnits = 1;
+    const cleanFamilyNames: string[] = [];
     // A blank row is a field the user opened and left alone, not an error.
     const companions = newCompanionNames.map((item) => item.trim()).filter(Boolean);
     if (companions.some((item) => item.length < 2)) {
@@ -1582,100 +1554,45 @@ function DongoApp() {
       );
     }
 
-    const ownerUnits = Math.min(12, Math.max(newOwnerIsFamily ? 2 : 1, Number(newOwnerUnits || 1)));
-    const headcount = ownerUnits + newCompanionNames.filter((item) => item.trim()).length;
+    const headcount = 1 + newCompanionNames.filter((item) => item.trim()).length;
 
     return (
       <>
         <View style={styles.peopleIntro}>
           <View style={styles.peopleIntroIcon}><Users size={19} color={C.purple} /></View>
           <View style={styles.peopleIntroCopy}>
-            <AppText style={styles.peopleIntroTitle}>کی‌ها توی «{newStoryName.trim()}» هستند؟</AppText>
-            <AppText style={styles.peopleIntroText}>اسم همه را همین‌جا بنویس. لازم نیست آن‌ها دنگودونگ را نصب کنند؛ حسابشان دست توست.</AppText>
+            <AppText style={styles.peopleIntroTitle}>کی‌ها توی «{newStoryName.trim()}» بودند؟</AppText>
+            <AppText style={styles.peopleIntroText}>اسم همه را بنویس؛ خرج‌ها بین همین‌ها تقسیم می‌شود. لازم نیست آن‌ها دنگودونگ را نصب کنند.</AppText>
           </View>
         </View>
 
-        <AppText style={styles.formLabel}>حساب‌های این ماجرا</AppText>
-
-        <View style={styles.ownerAccountCard}>
-          <View style={styles.ownerAccountHead}>
+        <View style={styles.peopleList}>
+          <View style={styles.selfRow}>
+            <AppText style={styles.selfRowName}>{accountName.trim() || 'من'}</AppText>
             <View style={styles.meBadge}><AppText style={styles.meText}>تو</AppText></View>
-            <AppText style={styles.ownerAccountName}>{accountName.trim() || 'حساب من'}</AppText>
           </View>
-          <AppText style={styles.ownerScopeQuestion}>دنگ چه کسانی را تو می‌دهی؟</AppText>
-          <View style={styles.payerScope}>
-            <Pressable
-              accessibilityRole="radio"
-              accessibilityState={{ selected: !newOwnerIsFamily }}
-              onPress={() => chooseOwnerScope(false)}
-              style={[styles.payerScopeOption, !newOwnerIsFamily && styles.payerScopeOptionActive]}
-            >
-              <View style={styles.payerScopeCopy}>
-                <AppText style={[styles.payerScopeTitle, !newOwnerIsFamily && styles.payerScopeTitleActive]}>فقط خودم</AppText>
-                <AppText style={styles.payerScopeText}>هر کس دیگری دنگ خودش را می‌دهد.</AppText>
-              </View>
-              {!newOwnerIsFamily && <View style={styles.payerScopeCheck}><Check size={12} color="#FFFFFF" /></View>}
-            </Pressable>
-            <Pressable
-              accessibilityRole="radio"
-              accessibilityState={{ selected: newOwnerIsFamily }}
-              onPress={() => chooseOwnerScope(true)}
-              style={[styles.payerScopeOption, newOwnerIsFamily && styles.payerScopeOptionActive]}
-            >
-              <View style={styles.payerScopeCopy}>
-                <AppText style={[styles.payerScopeTitle, newOwnerIsFamily && styles.payerScopeTitleActive]}>من و خانواده‌ام</AppText>
-                <AppText style={styles.payerScopeText}>دنگ آن‌ها هم روی حساب من حساب می‌شود.</AppText>
-              </View>
-              {newOwnerIsFamily && <View style={styles.payerScopeCheck}><Check size={12} color="#FFFFFF" /></View>}
-            </Pressable>
-          </View>
-
-          {newOwnerIsFamily && (
-            <>
-              <View style={styles.ownerUnitsRow}>
-                <View style={styles.memberUnitsFieldCopy}>
-                  <AppText style={styles.formLabelNoMargin}>روی هم چند نفرید؟</AppText>
-                  <AppText style={styles.formHelper}>با احتساب خودت؛ حداکثر ۱۲ نفر.</AppText>
-                </View>
-                <TextInput accessibilityLabel="تعداد نفرات حساب من" style={styles.memberUnitsInput} value={newOwnerUnits ? faNumber.format(Number(newOwnerUnits)) : ''} onChangeText={changeOwnerUnits} placeholder="۲" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" />
-              </View>
-              <View style={styles.familyInputsContent}>
-                {ownerFamilyNames.map((value, index) => (
-                  <View key={index} style={styles.familyInputRow}>
-                    <AppText style={styles.familyInputLabel}>عضو {faNumber.format(index + 2)}</AppText>
-                    <TextInput value={value} onChangeText={(text) => setOwnerFamilyNames((current) => current.map((item, itemIndex) => (itemIndex === index ? text : item)))} style={styles.familyNameInput} placeholder={`نام عضو ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" />
-                  </View>
-                ))}
-              </View>
-            </>
-          )}
+          {newCompanionNames.map((value, index) => (
+            <View key={index} style={styles.familyInputRow}>
+              <TextInput
+                autoFocus={index === newCompanionNames.length - 1}
+                value={value}
+                onChangeText={(text) => changeCompanionName(index, text)}
+                style={styles.familyNameInput}
+                placeholder={`اسم نفر ${faNumber.format(index + 2)}`}
+                placeholderTextColor={C.faint}
+                textAlign="right"
+              />
+              <Pressable accessibilityRole="button" accessibilityLabel={`حذف نفر ${faNumber.format(index + 2)}`} onPress={() => removeCompanionField(index)} style={styles.companionRemove}>
+                <X size={15} color={C.debt} />
+              </Pressable>
+            </View>
+          ))}
         </View>
 
-        <AppText style={styles.formLabel}>بقیه همراه‌ها</AppText>
-        {newCompanionNames.length ? (
-          <View style={styles.familyInputsContent}>
-            {newCompanionNames.map((value, index) => (
-              <View key={index} style={styles.familyInputRow}>
-                <TextInput autoFocus={index === newCompanionNames.length - 1} value={value} onChangeText={(text) => changeCompanionName(index, text)} style={styles.familyNameInput} placeholder={`نام نفر ${faNumber.format(index + 1)}`} placeholderTextColor={C.faint} textAlign="right" />
-                <Pressable accessibilityRole="button" accessibilityLabel={`حذف نفر ${faNumber.format(index + 1)}`} onPress={() => removeCompanionField(index)} style={styles.companionRemove}>
-                  <X size={15} color={C.debt} />
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        ) : (
-          <AppText style={styles.formHelper}>هنوز کسی اضافه نشده. اسم دوستانت را با دکمه زیر وارد کن.</AppText>
-        )}
         <Pressable accessibilityRole="button" onPress={() => setNewCompanionNames((current) => [...current, ''])} style={styles.addCompanionButton}>
           <UserPlus size={17} color={C.purple} />
           <AppText style={styles.addCompanionText}>افزودن نفر</AppText>
         </Pressable>
-
-        <View style={styles.friendsNote}>
-          <AppText style={styles.friendsNoteText}>
-            هر کسی که آخرش جدا تسویه می‌کند یک حساب جداست. اگر کسی با خانواده‌اش می‌آید، بعد از ساخت ماجرا روی کارتش بزن و تعدادش را زیاد کن. هر وقت هم خواستی، با کد دعوت بگذار خودشان از اپ ماجرا را ببینند.
-          </AppText>
-        </View>
 
         <View style={styles.storyStepActions}>
           <Pressable accessibilityRole="button" onPress={() => setStoryStep(1)} style={styles.storyBackButton}>
@@ -2247,7 +2164,7 @@ function DongoApp() {
                   {joinHouseholdNameInputs.map((value, index) => <View key={`join-home-${index}`} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>نفر {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setJoinHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`اسم نفر ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
                 </>
               ) : (
-                <Pressable accessibilityRole="button" onPress={() => { setJoinFamilyOpen(true); setJoinUnits('2'); setJoinHouseholdNameInputs(['']); }} style={styles.splitDisclosure}>
+                <Pressable accessibilityRole="button" onPress={() => { setJoinFamilyOpen(true); setJoinUnits('2'); setJoinHouseholdNameInputs(['']); setFamilyInfoModal(true); }} style={styles.splitDisclosure}>
                   <AppText style={styles.splitDisclosureText}>با خانواده‌ات می‌آیی؟</AppText>
                 </Pressable>
               )}
@@ -2727,7 +2644,7 @@ function DongoApp() {
                     {Number(newMemberUnits || 1) > 1 && <View style={styles.newMemberFamilySection}><AppText style={styles.formLabelNoMargin}>اسم بقیه</AppText><View style={styles.editFamilyInputsContent}>{newHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>نفر {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setNewHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`اسم نفر ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
                   </>
                 ) : (
-                  <Pressable accessibilityRole="button" onPress={() => { setNewMemberFamilyOpen(true); changeNewMemberUnits('2'); }} style={styles.splitDisclosure}>
+                  <Pressable accessibilityRole="button" onPress={() => { setNewMemberFamilyOpen(true); changeNewMemberUnits('2'); setFamilyInfoModal(true); }} style={styles.splitDisclosure}>
                     <AppText style={styles.splitDisclosureText}>با خانواده‌اش می‌آید؟</AppText>
                   </Pressable>
                 )}
@@ -2764,7 +2681,7 @@ function DongoApp() {
                 {joinHouseholdNameInputs.map((value, index) => <View key={`join-story-${index}`} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>نفر {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setJoinHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`اسم نفر ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}
               </>
             ) : (
-              <Pressable accessibilityRole="button" onPress={() => { setJoinFamilyOpen(true); setJoinUnits('2'); setJoinHouseholdNameInputs(['']); }} style={styles.splitDisclosure}>
+              <Pressable accessibilityRole="button" onPress={() => { setJoinFamilyOpen(true); setJoinUnits('2'); setJoinHouseholdNameInputs(['']); setFamilyInfoModal(true); }} style={styles.splitDisclosure}>
                 <AppText style={styles.splitDisclosureText}>با خانواده‌ات می‌آیی؟</AppText>
               </Pressable>
             )}
@@ -3000,22 +2917,11 @@ const styles = StyleSheet.create({
   memberUnitsField: { width: '100%', minHeight: 68, borderRadius: 17, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, marginTop: 10, padding: 10, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
   memberUnitsFieldCopy: { flex: 1, alignItems: 'flex-end' },
   memberUnitsInput: { width: 58, height: 48, borderRadius: 14, backgroundColor: C.purplePale, borderWidth: 1, borderColor: '#D7CEF8', fontFamily: F.extra, color: C.purple, fontSize: 18 },
-  payerScope: { gap: 9, marginTop: 4 },
-  payerScopeOption: { minHeight: 62, borderRadius: 17, borderWidth: 1.5, borderColor: C.line, backgroundColor: C.paper, paddingHorizontal: 14, paddingVertical: 11, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
-  payerScopeOptionActive: { borderColor: C.purple, backgroundColor: C.purplePale },
-  payerScopeCopy: { flex: 1, alignItems: 'flex-end' },
-  payerScopeTitle: { fontFamily: F.bold, fontSize: 13, textAlign: 'right' },
-  payerScopeTitleActive: { color: C.purpleDark },
-  payerScopeText: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 18, textAlign: 'right', marginTop: 2 },
-  payerScopeCheck: { width: 22, height: 22, borderRadius: 8, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center' },
-  friendsNote: { flexDirection: 'row-reverse', gap: 8, borderRadius: 15, backgroundColor: C.yellowPale, padding: 12, marginTop: 11 },
-  friendsNoteText: { flex: 1, fontFamily: F.medium, fontSize: 10, color: '#7A5B12', lineHeight: 19, textAlign: 'right' },
   familyInfoRow: { flexDirection: 'row-reverse', gap: 9, alignItems: 'flex-start', marginTop: 10 },
   familyInfoBullet: { width: 21, height: 21, borderRadius: 7, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
   familyInfoText: { flex: 1, fontFamily: F.medium, fontSize: 11, color: C.ink, lineHeight: 20, textAlign: 'right' },
   familyInfoButton: { alignSelf: 'stretch' },
   familyInfoExample: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 19, textAlign: 'right', backgroundColor: C.canvas, borderRadius: 12, padding: 11, marginTop: 12 },
-  ownerUnitsRow: { minHeight: 67, borderRadius: 17, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, marginTop: 10, padding: 10, flexDirection: 'row-reverse', alignItems: 'center', gap: 10 },
   welcomeBrand: { height: 72, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   welcomeContent: { paddingHorizontal: 22, paddingBottom: 34, alignItems: 'center' },
   storiesLoading: { flex: 1, paddingHorizontal: 28, alignItems: 'center', justifyContent: 'center' },
@@ -3046,15 +2952,14 @@ const styles = StyleSheet.create({
   storyHelper: { fontFamily: F.medium, color: C.muted, fontSize: 9, lineHeight: 18, textAlign: 'right', marginTop: 12 },
   createStoryButton: { minHeight: 55, borderRadius: 18, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18 },
   createStoryButtonGrow: { flex: 1, minHeight: 55, borderRadius: 18, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 10 },
+  peopleList: { gap: 8, marginTop: 14 },
+  selfRow: { minHeight: 57, borderRadius: 16, backgroundColor: C.purplePale, borderWidth: 1, borderColor: '#D7CEF8', paddingHorizontal: 14, flexDirection: 'row-reverse', alignItems: 'center', gap: 8 },
+  selfRowName: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
   peopleIntro: { flexDirection: 'row-reverse', gap: 10, borderRadius: 18, backgroundColor: C.purplePale, padding: 14, marginTop: 4 },
   peopleIntroIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center' },
   peopleIntroCopy: { flex: 1, gap: 4 },
   peopleIntroTitle: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
   peopleIntroText: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 19, textAlign: 'right' },
-  ownerAccountCard: { borderRadius: 18, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, padding: 13, gap: 9 },
-  ownerAccountHead: { flexDirection: 'row-reverse', alignItems: 'center', gap: 7 },
-  ownerAccountName: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
-  ownerScopeQuestion: { fontFamily: F.semi, fontSize: 11, color: C.muted, textAlign: 'right' },
   companionRemove: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.debtPale, alignItems: 'center', justifyContent: 'center' },
   addCompanionButton: { minHeight: 48, borderRadius: 16, borderWidth: 1.5, borderColor: '#D7CEF8', backgroundColor: C.purplePale, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 10 },
   addCompanionText: { fontFamily: F.bold, fontSize: 12, color: C.purple },
