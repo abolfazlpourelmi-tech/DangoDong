@@ -342,7 +342,12 @@ function DongoApp() {
   // "everybody has to install this first", which is exactly what it is not.
   // So the sheet is a two-step wizard now and step two is the guest list.
   const [storyStep, setStoryStep] = useState<1 | 2>(1);
-  const [newCompanionNames, setNewCompanionNames] = useState<string[]>([]);
+  // Two ways an outing splits, asked once at the top of step two instead of
+  // per person afterwards: everyone pays for themselves, or one person per
+  // family pays for the people under them.
+  const [splitByFamily, setSplitByFamily] = useState(false);
+  const [newCompanions, setNewCompanions] = useState<{ name: string; subs: string[] }[]>([]);
+  const [ownerSubNames, setOwnerSubNames] = useState<string[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [payments, setPayments] = useState<SettlementPayment[]>([]);
@@ -914,7 +919,10 @@ function DongoApp() {
     setAmount('');
     setCategory('food');
     setPayerId(currentMember?.id ?? members[0]?.id ?? '');
-    setSelectedPersonIds(members.map((member) => `${member.id}::0`));
+    setSelectedPersonIds(members.flatMap((member) => Array.from(
+      { length: Math.max(1, member.shareUnits ?? 1) },
+      (_, index) => `${member.id}::${index}`,
+    )));
     setSplitMode('equal');
     setSplitOptionsOpen(false);
     setShareInputs({});
@@ -927,38 +935,62 @@ function DongoApp() {
     if (!newStoryName.trim() || cloudBusy) return;
     // One field already waiting, so the next move is to type rather than to
     // find a button first.
-    setNewCompanionNames((current) => (current.length ? current : ['']));
+    setNewCompanions((current) => (current.length ? current : [{ name: '', subs: [] }]));
     setStoryStep(2);
   }
 
   function changeCompanionName(index: number, value: string) {
-    setNewCompanionNames((current) => current.map((item, itemIndex) => (itemIndex === index ? value : item)));
+    setNewCompanions((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, name: value } : item)));
   }
 
   function removeCompanionField(index: number) {
-    setNewCompanionNames((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    setNewCompanions((current) => current.filter((_, itemIndex) => itemIndex !== index));
+  }
+
+  function addCompanionSub(index: number) {
+    setNewCompanions((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, subs: [...item.subs, ''] } : item)));
+  }
+
+  function changeCompanionSub(index: number, subIndex: number, value: string) {
+    setNewCompanions((current) => current.map((item, itemIndex) => (itemIndex === index
+      ? { ...item, subs: item.subs.map((sub, i) => (i === subIndex ? value : sub)) }
+      : item)));
+  }
+
+  function removeCompanionSub(index: number, subIndex: number) {
+    setNewCompanions((current) => current.map((item, itemIndex) => (itemIndex === index
+      ? { ...item, subs: item.subs.filter((_, i) => i !== subIndex) }
+      : item)));
   }
 
   function resetStoryDraft() {
     setNewStoryName('');
-    setNewCompanionNames([]);
+    setNewCompanions([]);
+    setOwnerSubNames([]);
+    setSplitByFamily(false);
     setStoryStep(1);
   }
 
   async function createStory() {
     const name = newStoryName.trim();
     if (!name || cloudBusy) return;
-    // Testing found that asking, at creation time, whether the story owner is
-    // "فقط خودم" or "من و خانواده‌ام" stopped ten readers out of ten: it asks
-    // people to model the app's records before they have used it once. Everyone
-    // is one person here now, and the several-people-on-one-account idea lives
-    // only where it can be discovered later — on a member's own card.
-    const ownerUnits = 1;
-    const cleanFamilyNames: string[] = [];
+    // In per-person mode every row is one person. In per-family mode a row is
+    // whoever pays, and the names under it are the people they pay for.
+    const cleanFamilyNames = splitByFamily ? ownerSubNames.map((item) => item.trim()).filter(Boolean) : [];
+    const ownerUnits = 1 + cleanFamilyNames.length;
     // A blank row is a field the user opened and left alone, not an error.
-    const companions = newCompanionNames.map((item) => item.trim()).filter(Boolean);
-    if (companions.some((item) => item.length < 2)) {
-      showToast('نام هر همراه باید دست‌کم دو حرف باشد.');
+    const companions = newCompanions
+      .map((item) => ({
+        name: item.name.trim(),
+        subs: (splitByFamily ? item.subs : []).map((sub) => sub.trim()).filter(Boolean),
+      }))
+      .filter((item) => item.name);
+    if (companions.some((item) => item.name.length < 2)) {
+      showToast('نام هر نفر باید دست‌کم دو حرف باشد.');
+      return;
+    }
+    if (cleanFamilyNames.some((item) => item.length < 2) || companions.some((item) => item.subs.some((sub) => sub.length < 2))) {
+      showToast('نام هر عضو خانواده باید دست‌کم دو حرف باشد.');
       return;
     }
 
@@ -971,13 +1003,13 @@ function DongoApp() {
         template: newStoryTemplate,
         members: [
           { id: `${previewId}-owner`, name: ownerDisplayName, color: AVATAR_COLORS[0], isMe: true, shareUnits: ownerUnits, kind: 'registered', userId: 'local-preview-user', householdMembers: [ownerDisplayName, ...cleanFamilyNames] },
-          ...companions.map((companionName, index) => ({
+          ...companions.map((companion, index) => ({
             id: `${previewId}-guest-${index}`,
-            name: companionName,
+            name: companion.name,
             color: AVATAR_COLORS[(index + 1) % AVATAR_COLORS.length],
-            shareUnits: 1,
+            shareUnits: 1 + companion.subs.length,
             kind: 'guest' as const,
-            householdMembers: [companionName],
+            householdMembers: [companion.name, ...companion.subs],
           })),
         ],
         expenses: [],
@@ -1004,11 +1036,11 @@ function DongoApp() {
       // The story exists from here on, so a companion that fails to save is
       // reported by name instead of throwing the whole creation away.
       const failed: string[] = [];
-      for (const companionName of companions) {
+      for (const companion of companions) {
         try {
-          await addOnlineGuest(nextStoryId, companionName, 1, [companionName]);
+          await addOnlineGuest(nextStoryId, companion.name, 1 + companion.subs.length, [companion.name, ...companion.subs]);
         } catch {
-          failed.push(companionName);
+          failed.push(companion.name);
         }
       }
       await syncFromCloud(nextStoryId, true);
@@ -1189,7 +1221,7 @@ function DongoApp() {
       setEditingExpense(null);
       setExpenseModal(false);
       setTab('home');
-      showToast(editingExpense ? 'خرج آزمایشی ویرایش شد.' : 'هزینه آزمایشی با اعضای انتخاب‌شده ثبت شد.');
+      showToast(editingExpense ? 'خرج آزمایشی ویرایش شد.' : 'خرج آزمایشی با افراد انتخاب‌شده ثبت شد.');
       return;
     }
     setCloudBusy(true);
@@ -1557,44 +1589,108 @@ function DongoApp() {
       );
     }
 
-    const headcount = 1 + newCompanionNames.filter((item) => item.trim()).length;
+    const namedCompanions = newCompanions.filter((item) => item.name.trim());
+    const headcount = splitByFamily
+      ? 1 + ownerSubNames.filter((item) => item.trim()).length
+        + namedCompanions.reduce((sum, item) => sum + 1 + item.subs.filter((sub) => sub.trim()).length, 0)
+      : 1 + namedCompanions.length;
 
-    return (
-      <>
-        <View style={styles.peopleIntro}>
-          <View style={styles.peopleIntroIcon}><Users size={19} color={C.purple} /></View>
-          <View style={styles.peopleIntroCopy}>
-            <AppText style={styles.peopleIntroTitle}>کی‌ها توی «{newStoryName.trim()}» هستند؟</AppText>
-            <AppText style={styles.peopleIntroText}>اسم همه را بنویس؛ خرج‌ها بین همین‌ها تقسیم می‌شود. لازم نیست آن‌ها دنگودونگ را نصب کنند.</AppText>
-          </View>
-        </View>
-
-        <View style={styles.peopleList}>
-          <View style={styles.selfRow}>
-            <AppText style={styles.selfRowName}>{accountName.trim() || 'من'}</AppText>
-            <View style={styles.meBadge}><AppText style={styles.meText}>تو</AppText></View>
-          </View>
-          {newCompanionNames.map((value, index) => (
-            <View key={index} style={styles.familyInputRow}>
+    function renderSubNames(subs: string[], onChange: (index: number, value: string) => void, onRemove: (index: number) => void, onAdd: () => void) {
+      return (
+        <View style={styles.subList}>
+          {subs.map((value, subIndex) => (
+            <View key={subIndex} style={styles.subRow}>
               <TextInput
-                autoFocus={index === newCompanionNames.length - 1}
                 value={value}
-                onChangeText={(text) => changeCompanionName(index, text)}
-                style={styles.familyNameInput}
-                placeholder={`اسم نفر ${faNumber.format(index + 2)}`}
+                onChangeText={(text) => onChange(subIndex, text)}
+                style={styles.subNameInput}
+                placeholder="اسم عضو خانواده"
                 placeholderTextColor={C.faint}
                 textAlign="right"
               />
-              <Pressable accessibilityRole="button" accessibilityLabel={`حذف نفر ${faNumber.format(index + 2)}`} onPress={() => removeCompanionField(index)} style={styles.companionRemove}>
-                <X size={15} color={C.debt} />
+              <Pressable accessibilityRole="button" accessibilityLabel="حذف عضو خانواده" onPress={() => onRemove(subIndex)} style={styles.subRemove}>
+                <X size={13} color={C.debt} />
               </Pressable>
+            </View>
+          ))}
+          <Pressable accessibilityRole="button" onPress={onAdd} style={styles.addSubButton}>
+            <Plus size={14} color={C.purple} />
+            <AppText style={styles.addSubText}>افزودن عضو خانواده</AppText>
+          </Pressable>
+        </View>
+      );
+    }
+
+    return (
+      <>
+        <View style={styles.shareModeTabs}>
+          <Pressable
+            accessibilityRole="radio"
+            accessibilityState={{ selected: !splitByFamily }}
+            onPress={() => setSplitByFamily(false)}
+            style={[styles.shareModeTab, !splitByFamily && styles.shareModeTabActive]}
+          >
+            <AppText style={[styles.shareModeTabTitle, !splitByFamily && styles.shareModeTabTitleActive]}>هر کس جدا</AppText>
+            <AppText style={styles.shareModeTabHint}>هر نفر دنگ خودش را می‌دهد</AppText>
+          </Pressable>
+          <Pressable
+            accessibilityRole="radio"
+            accessibilityState={{ selected: splitByFamily }}
+            onPress={() => setSplitByFamily(true)}
+            style={[styles.shareModeTab, splitByFamily && styles.shareModeTabActive]}
+          >
+            <AppText style={[styles.shareModeTabTitle, splitByFamily && styles.shareModeTabTitleActive]}>خانوادگی</AppText>
+            <AppText style={styles.shareModeTabHint}>دنگ خانواده یک‌جا داده می‌شود</AppText>
+          </Pressable>
+        </View>
+
+        <AppText style={styles.peopleIntroText}>{splitByFamily
+          ? 'اسم کسی را بنویس که پول می‌دهد، و زیرش اسم افراد خانواده‌اش را. سهم هر نفر جدا حساب می‌شود، ولی آخرش یک مبلغ با سرپرست خانواده تسویه می‌شود.'
+          : 'اسم همه را بنویس. سهم هر نفر جدا حساب می‌شود و هر کس دنگ خودش را می‌دهد.'}</AppText>
+
+        <View style={styles.peopleList}>
+          <View style={styles.selfBlock}>
+            <View style={styles.selfRow}>
+              <AppText style={styles.selfRowName}>{accountName.trim() || 'من'}</AppText>
+              <View style={styles.meBadge}><AppText style={styles.meText}>تو</AppText></View>
+            </View>
+            {splitByFamily && renderSubNames(
+              ownerSubNames,
+              (index, value) => setOwnerSubNames((current) => current.map((item, i) => (i === index ? value : item))),
+              (index) => setOwnerSubNames((current) => current.filter((_, i) => i !== index)),
+              () => setOwnerSubNames((current) => [...current, '']),
+            )}
+          </View>
+
+          {newCompanions.map((companion, index) => (
+            <View key={index} style={styles.companionBlock}>
+              <View style={styles.familyInputRow}>
+                <TextInput
+                  autoFocus={index === newCompanions.length - 1 && !companion.name}
+                  value={companion.name}
+                  onChangeText={(text) => changeCompanionName(index, text)}
+                  style={styles.familyNameInput}
+                  placeholder={splitByFamily ? 'اسم کسی که پول می‌دهد' : `اسم نفر ${faNumber.format(index + 2)}`}
+                  placeholderTextColor={C.faint}
+                  textAlign="right"
+                />
+                <Pressable accessibilityRole="button" accessibilityLabel={`حذف نفر ${faNumber.format(index + 2)}`} onPress={() => removeCompanionField(index)} style={styles.companionRemove}>
+                  <X size={15} color={C.debt} />
+                </Pressable>
+              </View>
+              {splitByFamily && renderSubNames(
+                companion.subs,
+                (subIndex, value) => changeCompanionSub(index, subIndex, value),
+                (subIndex) => removeCompanionSub(index, subIndex),
+                () => addCompanionSub(index),
+              )}
             </View>
           ))}
         </View>
 
-        <Pressable accessibilityRole="button" onPress={() => setNewCompanionNames((current) => [...current, ''])} style={styles.addCompanionButton}>
+        <Pressable accessibilityRole="button" onPress={() => setNewCompanions((current) => [...current, { name: '', subs: [] }])} style={styles.addCompanionButton}>
           <UserPlus size={17} color={C.purple} />
-          <AppText style={styles.addCompanionText}>افزودن نفر</AppText>
+          <AppText style={styles.addCompanionText}>{splitByFamily ? 'افزودن خانواده' : 'افزودن نفر'}</AppText>
         </Pressable>
 
         <View style={styles.storyStepActions}>
@@ -2485,8 +2581,33 @@ function DongoApp() {
             <AppText style={styles.dialogTitle}>ویرایش این نفر</AppText>
             <AppText style={styles.dialogText}>{editingMember?.kind === 'guest' ? 'اسم و تعداد نفراتش را می‌توانی عوض کنی.' : 'اسمش را خودش در حسابش تعیین می‌کند؛ فقط تعداد نفراتش را می‌توانی عوض کنی.'}</AppText>
             <TextInput editable={editingMember?.kind === 'guest'} style={[styles.formInput, editingMember?.kind !== 'guest' && styles.readonlyInput]} value={editMemberName} onChangeText={setEditMemberName} placeholder="اسم این نفر" placeholderTextColor={C.faint} textAlign="right" />
-            <View style={styles.memberUnitsField}><View style={styles.memberUnitsFieldCopy}><AppText style={styles.formLabelNoMargin}>روی هم چند نفرند؟</AppText><AppText style={styles.formHelper}>هر خرج مساوی بین همین تعداد تقسیم می‌شود؛ حداکثر ۱۲ نفر</AppText></View><TextInput accessibilityLabel="تعداد نفرات این حساب" style={styles.memberUnitsInput} value={editMemberUnits ? faNumber.format(Number(editMemberUnits)) : ''} onChangeText={changeEditMemberUnits} placeholder="۱" placeholderTextColor={C.faint} keyboardType="number-pad" textAlign="center" /></View>
-            {Number(editMemberUnits || 1) > 1 && <View style={styles.editFamilySection}><AppText style={styles.formLabelNoMargin}>چه کسانی با این حساب‌اند</AppText><AppText style={styles.formHelper}>نفر اول ثابت است؛ اسم بقیه را وارد کن.</AppText><View style={styles.editFamilyFixedRow}><View style={styles.familyFixedBadge}><Check size={13} color={C.mintDark} /><AppText style={styles.familyFixedText}>ثابت</AppText></View><View style={styles.editFamilyFixedCopy}><AppText style={styles.familyInputLabel}>نفر ۱</AppText><AppText style={styles.editFamilyFixedName}>{editingMember?.kind === 'guest' ? editMemberName || 'این حساب' : editingMember?.householdMembers?.[0] || accountName.trim() || editingMember?.name || 'من'}</AppText></View></View><View style={styles.editFamilyInputsContent}>{editHouseholdNameInputs.map((value, index) => <View key={index} style={styles.familyInputRow}><AppText style={styles.familyInputLabel}>نفر {faNumber.format(index + 2)}</AppText><TextInput value={value} onChangeText={(text) => setEditHouseholdNameInputs((current) => current.map((item, itemIndex) => itemIndex === index ? text : item))} style={styles.familyNameInput} placeholder={`اسم نفر ${faNumber.format(index + 2)}`} placeholderTextColor={C.faint} textAlign="right" /></View>)}</View></View>}
+            {/* Same shape as step two of creating a story: names, not a count.
+                A card with nobody under it simply has an empty list. */}
+            <View style={styles.editFamilySection}>
+              <AppText style={styles.formLabelNoMargin}>چه کسانی دنگشان را {editingMember?.isMe ? 'تو می‌دهی' : 'او می‌دهد'}؟</AppText>
+              <AppText style={styles.formHelper}>اگر کسی زیرمجموعه‌اش نیست، این قسمت را خالی بگذار.</AppText>
+              <View style={styles.subList}>
+                {editHouseholdNameInputs.map((value, index) => (
+                  <View key={index} style={styles.subRow}>
+                    <TextInput
+                      value={value}
+                      onChangeText={(text) => setEditHouseholdNameInputs((current) => current.map((item, itemIndex) => (itemIndex === index ? text : item)))}
+                      style={styles.subNameInput}
+                      placeholder="اسم عضو خانواده"
+                      placeholderTextColor={C.faint}
+                      textAlign="right"
+                    />
+                    <Pressable accessibilityRole="button" accessibilityLabel="حذف عضو خانواده" onPress={() => { setEditHouseholdNameInputs((current) => current.filter((_, itemIndex) => itemIndex !== index)); setEditMemberUnits((current) => String(Math.max(1, Number(current || 1) - 1))); }} style={styles.subRemove}>
+                      <X size={13} color={C.debt} />
+                    </Pressable>
+                  </View>
+                ))}
+                <Pressable accessibilityRole="button" onPress={() => { setEditHouseholdNameInputs((current) => [...current, '']); setEditMemberUnits((current) => String(Math.min(12, Number(current || 1) + 1))); }} style={styles.addSubButton}>
+                  <Plus size={14} color={C.purple} />
+                  <AppText style={styles.addSubText}>افزودن عضو خانواده</AppText>
+                </Pressable>
+              </View>
+            </View>
             {editingMember?.kind === 'guest' && canManageGuests && (
               <Pressable accessibilityRole="button" onPress={() => { if (editingMember) setDeleteMemberTarget(editingMember); }} style={styles.removeMemberButton}>
                 <Trash2 size={16} color={C.debt} />
@@ -2565,7 +2686,14 @@ function DongoApp() {
 
               {splitMode === 'equal' ? (
                 <>
-                  <View style={styles.splitHeader}><View style={styles.equalBadge}><AppText style={styles.equalBadgeText}>حدوداً هر نفر: {formatMoney(sharePreview)}</AppText></View><View><AppText style={styles.formLabelNoMargin}>چه کسانی در این خرج بودند؟</AppText><AppText style={styles.formHelper}>همه از اول انتخاب‌اند. اگر کسی نبوده، اسمش را بزن تا خاموش شود.</AppText></View></View>
+                  <View style={styles.splitHeader}><View style={styles.equalBadge}><AppText style={styles.equalBadgeText}>حدوداً هر نفر: {formatMoney(sharePreview)}</AppText></View><View style={styles.splitHeaderCopy}><AppText style={styles.formLabelNoMargin}>چه کسانی در این خرج بودند؟</AppText><AppText style={styles.formHelper}>همه از اول انتخاب‌اند. اگر کسی نبوده، اسمش را بزن تا خاموش شود.</AppText></View></View>
+                  {/* Unticking people is easy to overshoot, so there is a way back. */}
+                  {selectedPersonIds.length < expensePeople.length && (
+                    <Pressable accessibilityRole="button" onPress={() => setSelectedPersonIds(expensePeople.map((person) => person.id))} style={styles.selectAllButton}>
+                      <Check size={14} color={C.purple} />
+                      <AppText style={styles.selectAllText}>انتخاب همه ({faNumber.format(expensePeople.length)} نفر)</AppText>
+                    </Pressable>
+                  )}
                   {/* With no households in the story every account is one person,
                       and wrapping each single name in its own titled card just
                       makes a short list look like a form. */}
@@ -2957,6 +3085,23 @@ const styles = StyleSheet.create({
   storyHelper: { fontFamily: F.medium, color: C.muted, fontSize: 9, lineHeight: 18, textAlign: 'right', marginTop: 12 },
   createStoryButton: { minHeight: 55, borderRadius: 18, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 18 },
   createStoryButtonGrow: { flex: 1, minHeight: 55, borderRadius: 18, backgroundColor: C.purple, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingHorizontal: 10 },
+  splitHeaderCopy: { flex: 1 },
+  selectAllButton: { alignSelf: 'flex-end', minHeight: 44, borderRadius: 13, backgroundColor: C.purplePale, paddingHorizontal: 13, flexDirection: 'row-reverse', alignItems: 'center', gap: 6, marginTop: 9 },
+  selectAllText: { fontFamily: F.bold, fontSize: 11, color: C.purple },
+  shareModeTabs: { flexDirection: 'row-reverse', gap: 8, marginTop: 4 },
+  shareModeTab: { flex: 1, minHeight: 72, borderRadius: 17, borderWidth: 1.5, borderColor: C.line, backgroundColor: C.paper, paddingHorizontal: 11, paddingVertical: 10, justifyContent: 'center', gap: 3 },
+  shareModeTabActive: { borderColor: C.purple, backgroundColor: C.purplePale },
+  shareModeTabTitle: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
+  shareModeTabTitleActive: { color: C.purple },
+  shareModeTabHint: { fontFamily: F.medium, fontSize: 9, color: C.muted, lineHeight: 15, textAlign: 'right' },
+  selfBlock: { gap: 6 },
+  companionBlock: { gap: 6 },
+  subList: { gap: 6, paddingRight: 16, borderRightWidth: 2, borderRightColor: '#E3DCF6', marginRight: 6 },
+  subRow: { minHeight: 48, borderRadius: 13, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, padding: 6, flexDirection: 'row-reverse', alignItems: 'center', gap: 6 },
+  subNameInput: { flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: C.canvas, color: C.ink, paddingHorizontal: 10, fontFamily: F.semi, fontSize: 11, writingDirection: 'rtl' },
+  subRemove: { width: 36, height: 36, borderRadius: 11, backgroundColor: C.debtPale, alignItems: 'center', justifyContent: 'center' },
+  addSubButton: { minHeight: 44, borderRadius: 13, backgroundColor: C.purplePale, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  addSubText: { fontFamily: F.bold, fontSize: 11, color: C.purple },
   peopleList: { gap: 8, marginTop: 14 },
   selfRow: { minHeight: 57, borderRadius: 16, backgroundColor: C.purplePale, borderWidth: 1, borderColor: '#D7CEF8', paddingHorizontal: 14, flexDirection: 'row-reverse', alignItems: 'center', gap: 8 },
   selfRowName: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
