@@ -900,7 +900,7 @@ function DongoApp() {
       await syncFromCloud(storyId);
       setDeleteExpenseTarget(null);
       setExpenseDetailsModal(false);
-      showToast('خرج حذف شد و دنگ‌ها دوباره محاسبه شدند');
+      showToast('خرج حذف شد و دونگ‌ها دوباره محاسبه شدند');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
       showToast(friendlyError(error, 'حذف خرج ناموفق بود'));
@@ -1232,7 +1232,7 @@ function DongoApp() {
         setEditingExpense(null);
         setExpenseModal(false);
         setTab('home');
-        showToast('خرج ویرایش شد و دنگ‌ها دوباره محاسبه شدند');
+        showToast('خرج ویرایش شد و دونگ‌ها دوباره محاسبه شدند');
         void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
         return;
       }
@@ -1544,7 +1544,7 @@ function DongoApp() {
             </View>
             <View style={styles.familyInfoRow}>
               <View style={[styles.familyInfoBullet, { backgroundColor: C.mintPale }]}><Check size={12} color={C.mintDark} /></View>
-              <AppText style={styles.familyInfoText}>ولی تسویه یک‌جاست: دنگ همه‌شان روی حساب تو جمع می‌شود و تو یک‌بار پرداخت یا دریافت می‌کنی.</AppText>
+              <AppText style={styles.familyInfoText}>ولی تسویه یک‌جاست: دونگ همه‌شان روی حساب تو جمع می‌شود و تو یک‌بار پرداخت یا دریافت می‌کنی.</AppText>
             </View>
             <View style={styles.familyInfoRow}>
               <View style={[styles.familyInfoBullet, { backgroundColor: C.debtPale }]}><X size={12} color={C.debt} /></View>
@@ -1651,7 +1651,7 @@ function DongoApp() {
             style={[styles.shareModeTab, !splitByFamily && styles.shareModeTabActive]}
           >
             <AppText style={[styles.shareModeTabTitle, !splitByFamily && styles.shareModeTabTitleActive]}>هر کس جدا</AppText>
-            <AppText style={styles.shareModeTabHint}>هر نفر دنگ خودش را می‌دهد</AppText>
+            <AppText style={styles.shareModeTabHint}>هر نفر دونگ خودش را می‌دهد</AppText>
           </Pressable>
           <Pressable
             accessibilityRole="radio"
@@ -1660,7 +1660,7 @@ function DongoApp() {
             style={[styles.shareModeTab, splitByFamily && styles.shareModeTabActive]}
           >
             <AppText style={[styles.shareModeTabTitle, splitByFamily && styles.shareModeTabTitleActive]}>خانوادگی</AppText>
-            <AppText style={styles.shareModeTabHint}>دنگ خانواده یک‌جا داده می‌شود</AppText>
+            <AppText style={styles.shareModeTabHint}>دونگ خانواده یک‌جا داده می‌شود</AppText>
           </Pressable>
         </View>
 
@@ -1781,7 +1781,7 @@ function DongoApp() {
           style={styles.accountHero}
         >
           <View style={styles.accountHeroIcon}><UserRound size={30} color="#FFFFFF" /></View>
-          <View style={styles.accountHeroCopy}><AppText style={styles.accountTitle}>حساب من</AppText><AppText style={styles.accountSubtitle}>این‌ها را فقط برای این می‌پرسیم که بقیه بدانند دنگت را کجا بریزند.</AppText></View>
+          <View style={styles.accountHeroCopy}><AppText style={styles.accountTitle}>حساب من</AppText><AppText style={styles.accountSubtitle}>این‌ها را فقط برای این می‌پرسیم که بقیه بدانند دونگت را کجا بریزند.</AppText></View>
         </Pressable>
         {adPanelOpen && (
           <View style={styles.adPanel}>
@@ -1882,8 +1882,8 @@ function DongoApp() {
               </View>
             </View>
           )}
-          <AppText style={styles.accountLabel}>شماره کارت برای دریافت دنگ <AppText style={styles.optionalMark}>اختیاری</AppText></AppText>
-          <TextInput accessibilityLabel="شماره کارت دریافت دنگ" value={accountCardNumber} onChangeText={(value) => setAccountCardNumber(normalizeDigits(value).slice(0, 16))} placeholder="۱۶ رقم بدون فاصله" placeholderTextColor={C.faint} keyboardType="number-pad" style={[styles.accountInput, styles.accountCardInput]} textAlign="center" />
+          <AppText style={styles.accountLabel}>شماره کارت برای دریافت دونگ <AppText style={styles.optionalMark}>اختیاری</AppText></AppText>
+          <TextInput accessibilityLabel="شماره کارت دریافت دونگ" value={accountCardNumber} onChangeText={(value) => setAccountCardNumber(normalizeDigits(value).slice(0, 16))} placeholder="۱۶ رقم بدون فاصله" placeholderTextColor={C.faint} keyboardType="number-pad" style={[styles.accountInput, styles.accountCardInput]} textAlign="center" />
           <AppText style={styles.accountHint}>رمز، CVV2 و تاریخ انقضا دریافت یا ذخیره نمی‌شوند.</AppText>
           {accountError ? <AppText style={styles.accountError}>{accountError}</AppText> : null}
           <Pressable accessibilityRole="button" disabled={accountSaving} onPress={() => void saveAccount()} style={({ pressed }) => [styles.accountSaveButton, pressed && styles.pressed, accountSaving && styles.saveButtonDisabled]}><AppText style={styles.accountSaveText}>{accountSaving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}</AppText></Pressable>
@@ -1989,7 +1989,7 @@ function DongoApp() {
                   </AppText>
                   {/* "۱ سهم" on a one-person account is accounting vocabulary with
                       nothing to say. It only means something above one. */}
-                  {(member.shareUnits ?? 1) > 1 && <View style={styles.memberUnitsBadge}><Users size={11} color={C.purple} /><AppText style={styles.memberUnitsText}>دنگ {faNumber.format(member.shareUnits ?? 1)} نفر</AppText></View>}
+                  {(member.shareUnits ?? 1) > 1 && <View style={styles.memberUnitsBadge}><Users size={11} color={C.purple} /><AppText style={styles.memberUnitsText}>دونگ {faNumber.format(member.shareUnits ?? 1)} نفر</AppText></View>}
                   {(member.shareUnits ?? 1) > 1 && <AppText numberOfLines={2} style={styles.householdNamesPreview}>{member.householdMembers?.length ? member.householdMembers.join('، ') : 'برای ثبت اسم افراد، کارت را بزن'}</AppText>}
                 </View>
               </Pressable>
@@ -2000,7 +2000,7 @@ function DongoApp() {
         {members.length === 1 && !storyCompleted && (
           <View style={styles.loneMemberNotice}>
             <AppText style={styles.loneMemberTitle}>فعلاً فقط خودت توی این ماجرایی</AppText>
-            <AppText style={styles.loneMemberText}>بقیه را دعوت کن به این ماجرا تا دنگ بین همه تقسیم شود. هر کس اپ ندارد، خودت اسمش را ثبت کن.</AppText>
+            <AppText style={styles.loneMemberText}>بقیه را دعوت کن به این ماجرا تا دونگ بین همه تقسیم شود. هر کس اپ ندارد، خودت اسمش را ثبت کن.</AppText>
             <View style={styles.loneMemberActions}>
               <Pressable accessibilityRole="button" onPress={() => { openNewMemberModal(); setMemberMode('invite'); }} style={styles.loneMemberButton}>
                 <UserPlus size={17} color="#FFFFFF" />
@@ -2024,7 +2024,7 @@ function DongoApp() {
           {expenses.length ? expenses.slice(0, 3).map(renderExpense) : (
             <View style={styles.inlineEmpty}>
               <AppText style={styles.inlineEmptyTitle}>هنوز خرجی ثبت نشده</AppText>
-              <AppText style={styles.inlineEmptyText}>{storyCompleted ? 'این ماجرا بدون هیچ خرجی به پایان رسیده است.' : 'اولین خرج را ثبت کن تا دنگ‌ها محاسبه شوند.'}</AppText>
+              <AppText style={styles.inlineEmptyText}>{storyCompleted ? 'این ماجرا بدون هیچ خرجی به پایان رسیده است.' : 'اولین خرج را ثبت کن تا دونگ‌ها محاسبه شوند.'}</AppText>
               {!storyCompleted && <Pressable accessibilityRole="button" style={styles.inlineEmptyButton} onPress={openExpenseModal}><Plus size={17} color="#FFFFFF" /><AppText style={styles.inlineEmptyButtonText}>ثبت اولین خرج</AppText></Pressable>}
             </View>
           )}
@@ -2092,11 +2092,11 @@ function DongoApp() {
               <View style={styles.cardPromptIcon}><WalletCards size={22} color={C.purple} /></View>
               <View style={styles.cardPromptCopy}>
                 <AppText style={styles.cardPromptTitle}>شماره کارتت را ثبت کن</AppText>
-                <AppText style={styles.cardPromptText}>تا وقتی ثبت نکنی، بقیه نمی‌دانند دنگت را به کدام کارت بریزند.</AppText>
+                <AppText style={styles.cardPromptText}>تا وقتی ثبت نکنی، بقیه نمی‌دانند دونگت را به کدام کارت بریزند.</AppText>
               </View>
             </View>
             <TextInput
-              accessibilityLabel="شماره کارت برای دریافت دنگ"
+              accessibilityLabel="شماره کارت برای دریافت دونگ"
               value={accountCardNumber}
               onChangeText={(value) => { setAccountCardNumber(normalizeDigits(value).slice(0, 16)); setAccountError(''); }}
               placeholder="۱۶ رقم بدون فاصله"
@@ -2208,7 +2208,7 @@ function DongoApp() {
                 ) : (
                   <View style={styles.transferCardMissing}>
                     <AppText style={styles.transferCardMissingText}>{to?.isMe
-                      ? 'هنوز شماره کارتت را نداده‌ای. از بالای همین صفحه واردش کن تا بقیه بتوانند دنگت را بریزند.'
+                      ? 'هنوز شماره کارتت را نداده‌ای. از بالای همین صفحه واردش کن تا بقیه بتوانند دونگت را بریزند.'
                       : to?.kind === 'guest'
                         ? `${to?.name} در اپ نیست؛ شماره کارتش را باید خودت بپرسی.`
                         : `${to?.name} هنوز شماره کارتی ثبت نکرده.`}</AppText>
@@ -2272,7 +2272,7 @@ function DongoApp() {
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeader}>
                 <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => setStoryModal(false)}><X size={21} color={C.ink} /></Pressable>
-                <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>ماجرای جدید</AppText><AppText style={styles.sheetSubtitle}>{storyStep === 1 ? 'مرحله ۱ از ۲ · موضوع دنگ‌هات' : 'مرحله ۲ از ۲ · چه کسانی هستند'}</AppText></View>
+                <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>ماجرای جدید</AppText><AppText style={styles.sheetSubtitle}>{storyStep === 1 ? 'مرحله ۱ از ۲ · موضوع دونگ‌هات' : 'مرحله ۲ از ۲ · چه کسانی هستند'}</AppText></View>
                 <View style={styles.sheetSpark}><Sparkles size={20} color={C.purple} /></View>
               </View>
               <ScrollView
@@ -2487,7 +2487,7 @@ function DongoApp() {
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
               <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => setStoryModal(false)}><X size={21} color={C.ink} /></Pressable>
-              <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>ماجرای جدید</AppText><AppText style={styles.sheetSubtitle}>{storyStep === 1 ? 'مرحله ۱ از ۲ · موضوع دنگ‌هات' : 'مرحله ۲ از ۲ · چه کسانی هستند'}</AppText></View>
+              <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>ماجرای جدید</AppText><AppText style={styles.sheetSubtitle}>{storyStep === 1 ? 'مرحله ۱ از ۲ · موضوع دونگ‌هات' : 'مرحله ۲ از ۲ · چه کسانی هستند'}</AppText></View>
               <View style={styles.sheetSpark}><Sparkles size={20} color={C.purple} /></View>
             </View>
             <ScrollView
@@ -2547,7 +2547,7 @@ function DongoApp() {
             <AppText style={styles.dialogTitle}>این خرج حذف شود؟</AppText>
             <AppText style={styles.finishDialogText}>
               {deleteExpenseTarget
-                ? `«${deleteExpenseTarget.title}» به مبلغ ${formatMoney(deleteExpenseTarget.amount)} حذف می‌شود و دنگ همه اعضا دوباره محاسبه خواهد شد.`
+                ? `«${deleteExpenseTarget.title}» به مبلغ ${formatMoney(deleteExpenseTarget.amount)} حذف می‌شود و دونگ همه اعضا دوباره محاسبه خواهد شد.`
                 : ''}
             </AppText>
             <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>این عملیات برگشت‌پذیر نیست.</AppText></View>
@@ -2619,7 +2619,7 @@ function DongoApp() {
             {/* Same shape as step two of creating a story: names, not a count.
                 A card with nobody under it simply has an empty list. */}
             <View style={styles.editFamilySection}>
-              <AppText style={styles.formLabelNoMargin}>چه کسانی دنگشان را {editingMember?.isMe ? 'تو می‌دهی' : 'او می‌دهد'}؟</AppText>
+              <AppText style={styles.formLabelNoMargin}>چه کسانی دونگشان را {editingMember?.isMe ? 'تو می‌دهی' : 'او می‌دهد'}؟</AppText>
               <AppText style={styles.formHelper}>اگر کسی با او حساب نمی‌کند، اینجا را خالی بگذار.</AppText>
               <View style={styles.subList}>
                 {editHouseholdNameInputs.map((value, index) => (
@@ -2663,7 +2663,7 @@ function DongoApp() {
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
               <Pressable accessibilityRole="button" accessibilityLabel="بستن" style={styles.sheetClose} onPress={() => { setExpenseModal(false); setEditingExpense(null); }}><X size={21} color={C.ink} /></Pressable>
-              <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>{editingExpense ? 'ویرایش خرج' : 'خرج جدید'}</AppText><AppText style={styles.sheetSubtitle}>{editingExpense ? 'تغییرات روی دنگ همه اثر می‌گذارد' : 'مبلغی که پرداخت شد را وارد کن'}</AppText></View>
+              <View style={styles.sheetHeaderCopy}><AppText style={styles.sheetTitle}>{editingExpense ? 'ویرایش خرج' : 'خرج جدید'}</AppText><AppText style={styles.sheetSubtitle}>{editingExpense ? 'تغییرات روی دونگ همه اثر می‌گذارد' : 'مبلغی که پرداخت شد را وارد کن'}</AppText></View>
               <View style={styles.sheetSpark}><Sparkles size={20} color={C.purple} /></View>
             </View>
 
