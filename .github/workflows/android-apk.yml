@@ -55,17 +55,30 @@ jobs:
           EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
         run: pnpm exec expo prebuild --platform android --non-interactive
 
+      - name: Keep only the architectures real phones use
+        # The universal APK carried four: 48 MB of native libraries, of which a
+        # handset loads exactly one. x86 and x86_64 are emulator targets. Setting
+        # this on defaultConfig drops them at packaging time; arm64-v8a covers
+        # anything modern and armeabi-v7a the older 32-bit phones.
+        run: |
+          python3 - <<'EOF'
+          import io, re
+          path = 'android/app/build.gradle'
+          source = io.open(path, encoding='utf-8').read()
+          assert 'abiFilters' not in source, 'already filtered'
+          marker = 'defaultConfig {'
+          index = source.index(marker) + len(marker)
+          source = source[:index] + "\n        ndk {\n            abiFilters 'armeabi-v7a', 'arm64-v8a'\n        }" + source[index:]
+          io.open(path, 'w', encoding='utf-8').write(source)
+          print('abiFilters applied')
+          EOF
+
       - name: Build release APK
         working-directory: android
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
-        # The universal APK carried four architectures — 48 MB of native
-        # libraries, of which a phone loads exactly one. x86 and x86_64 exist
-        # for emulators; no handset this ships to runs them. Dropping the two
-        # leaves every real device covered: arm64-v8a for anything modern,
-        # armeabi-v7a for older 32-bit phones.
-        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
+        run: ./gradlew assembleRelease
 
       - name: Prepare signing key
         run: |
