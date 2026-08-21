@@ -60,7 +60,12 @@ jobs:
         env:
           EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
           EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
-        run: ./gradlew assembleRelease
+        # The universal APK carried four architectures — 48 MB of native
+        # libraries, of which a phone loads exactly one. x86 and x86_64 exist
+        # for emulators; no handset this ships to runs them. Dropping the two
+        # leaves every real device covered: arm64-v8a for anything modern,
+        # armeabi-v7a for older 32-bit phones.
+        run: ./gradlew assembleRelease -PreactNativeArchitectures=arm64-v8a,armeabi-v7a
 
       - name: Prepare signing key
         run: |

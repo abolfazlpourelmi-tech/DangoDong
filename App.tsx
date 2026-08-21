@@ -9,7 +9,31 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
-import * as LucideIcons from 'lucide-react-native';
+import ArrowLeftIcon from 'lucide-react-native/icons/arrow-left';
+import ArrowRightIcon from 'lucide-react-native/icons/arrow-right';
+import BedDoubleIcon from 'lucide-react-native/icons/bed-double';
+import BellIcon from 'lucide-react-native/icons/bell';
+import CarFrontIcon from 'lucide-react-native/icons/car-front';
+import CheckIcon from 'lucide-react-native/icons/check';
+import ChevronLeftIcon from 'lucide-react-native/icons/chevron-left';
+import HandCoinsIcon from 'lucide-react-native/icons/hand-coins';
+import HomeIcon from 'lucide-react-native/icons/house';
+import PencilIcon from 'lucide-react-native/icons/pencil';
+import PartyPopperIcon from 'lucide-react-native/icons/party-popper';
+import PlusIcon from 'lucide-react-native/icons/plus';
+import CopyIcon from 'lucide-react-native/icons/copy';
+import ReceiptTextIcon from 'lucide-react-native/icons/receipt-text';
+import LogOutIcon from 'lucide-react-native/icons/log-out';
+import ShoppingBasketIcon from 'lucide-react-native/icons/shopping-basket';
+import SparklesIcon from 'lucide-react-native/icons/sparkles';
+import UtensilsIcon from 'lucide-react-native/icons/utensils';
+import UsersIcon from 'lucide-react-native/icons/users';
+import UserPlusIcon from 'lucide-react-native/icons/user-plus';
+import Trash2Icon from 'lucide-react-native/icons/trash-2';
+import AlertTriangleIcon from 'lucide-react-native/icons/triangle-alert';
+import WalletCardsIcon from 'lucide-react-native/icons/wallet-cards';
+import UserRoundIcon from 'lucide-react-native/icons/user-round';
+import XIcon from 'lucide-react-native/icons/x';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -75,9 +99,13 @@ import {
   loadStoryMemberCards,
 } from './src/storyRepository';
 
-// SDK 54 pins react-native-svg 15.12, whose recursive icon prop types can
-// overflow TypeScript 5.9 under newer Node runtimes. Runtime props remain the
-// same; narrowing the third-party icon namespace here keeps app types stable.
+// Imported one file at a time rather than from the package index. Metro does
+// not tree-shake, so `import * as LucideIcons` put all 1777 icons in the
+// bundle to use 25 of them.
+//
+// The cast is the same workaround as before: react-native-svg 15.12, which
+// SDK 54 pins, has recursive icon prop types that overflow TypeScript 5.9 on
+// newer Node runtimes. Runtime props are unchanged.
 const {
   ArrowLeft,
   ArrowRight,
@@ -104,7 +132,33 @@ const {
   WalletCards,
   UserRound,
   X,
-} = LucideIcons as Record<string, any>;
+} = {
+  ArrowLeft: ArrowLeftIcon,
+  ArrowRight: ArrowRightIcon,
+  BedDouble: BedDoubleIcon,
+  Bell: BellIcon,
+  CarFront: CarFrontIcon,
+  Check: CheckIcon,
+  ChevronLeft: ChevronLeftIcon,
+  HandCoins: HandCoinsIcon,
+  Home: HomeIcon,
+  Pencil: PencilIcon,
+  PartyPopper: PartyPopperIcon,
+  Plus: PlusIcon,
+  Copy: CopyIcon,
+  ReceiptText: ReceiptTextIcon,
+  LogOut: LogOutIcon,
+  ShoppingBasket: ShoppingBasketIcon,
+  Sparkles: SparklesIcon,
+  Utensils: UtensilsIcon,
+  Users: UsersIcon,
+  UserPlus: UserPlusIcon,
+  Trash2: Trash2Icon,
+  AlertTriangle: AlertTriangleIcon,
+  WalletCards: WalletCardsIcon,
+  UserRound: UserRoundIcon,
+  X: XIcon,
+} as Record<string, any>;
 
 const C = {
   canvas: '#FFF8EF',
@@ -1544,6 +1598,7 @@ function DongoApp() {
   function renderFamilyInfoModal() {
     return (
       <Modal visible={familyInfoModal} animationType="fade" transparent onRequestClose={() => setFamilyInfoModal(false)}>
+        {familyInfoModal && (
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Users size={26} color={C.purple} /></View>
@@ -1571,6 +1626,7 @@ function DongoApp() {
             </Pressable>
           </View>
         </View>
+        )}
       </Modal>
     );
   }
@@ -1654,6 +1710,10 @@ function DongoApp() {
 
     return (
       <>
+        {/* The question the screen is asking, above the two ways to answer it.
+            Lost when the mode switch went in; the tabs alone read as settings. */}
+        <AppText style={styles.peopleQuestion}>کی‌ها توی «{newStoryName.trim()}» هستند؟</AppText>
+
         <View style={styles.shareModeTabs}>
           <Pressable
             accessibilityRole="radio"
@@ -2278,6 +2338,7 @@ function DongoApp() {
         </ScrollView>}
 
         <Modal visible={storyModal} animationType="slide" transparent onRequestClose={() => setStoryModal(false)}>
+          {storyModal && (
           <View style={[styles.modalBackdrop, { paddingBottom: bottomInset }]}>
               <View style={[styles.storySheet, { height: sheetHeight }]} accessibilityViewIsModal>
               <View style={styles.sheetHandle} />
@@ -2296,9 +2357,11 @@ function DongoApp() {
               </ScrollView>
             </View>
           </View>
+          )}
         </Modal>
         {renderFamilyInfoModal()}
         <Modal visible={joinModal} animationType="fade" transparent onRequestClose={() => setJoinModal(false)}>
+          {joinModal && (
           <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={styles.dialog} accessibilityViewIsModal>
               <View style={styles.dialogIcon}><UserPlus size={26} color={C.purple} /></View>
@@ -2321,6 +2384,7 @@ function DongoApp() {
               </View>
             </View>
           </ScrollView>
+          )}
         </Modal>
       </View>
     );
@@ -2402,6 +2466,7 @@ function DongoApp() {
       </View>}
 
       <Modal visible={storySwitcher} animationType="fade" transparent onRequestClose={() => setStorySwitcher(false)}>
+        {storySwitcher && (
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.storySwitcherCard} accessibilityViewIsModal>
             <View style={styles.switcherHeader}>
@@ -2426,9 +2491,11 @@ function DongoApp() {
             <Pressable accessibilityRole="button" onPress={openNewStory} style={styles.newStoryFromSwitcher}><Plus size={20} color="#FFFFFF" /><AppText style={styles.newStoryFromSwitcherText}>ساخت ماجرای جدید</AppText></Pressable>
           </View>
         </View>
+        )}
       </Modal>
 
       <Modal visible={notificationsModal} animationType="fade" transparent onRequestClose={() => setNotificationsModal(false)}>
+        {notificationsModal && (
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.notificationsCard} accessibilityViewIsModal>
             <View style={styles.switcherHeader}>
@@ -2453,9 +2520,11 @@ function DongoApp() {
             </ScrollView>
           </View>
         </View>
+        )}
       </Modal>
 
       <Modal visible={expenseDetailsModal} animationType="fade" transparent onRequestClose={() => setExpenseDetailsModal(false)}>
+        {expenseDetailsModal && (
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.expenseDetailsCard} accessibilityViewIsModal>
             <View style={styles.switcherHeader}>
@@ -2490,9 +2559,11 @@ function DongoApp() {
             </>}
           </View>
         </View>
+        )}
       </Modal>
 
       <Modal visible={storyModal} animationType="slide" transparent onRequestClose={() => setStoryModal(false)}>
+        {storyModal && (
         <View style={[styles.modalBackdrop, { paddingBottom: bottomInset }]}>
           <View style={[styles.storySheet, { height: sheetHeight }]} accessibilityViewIsModal>
             <View style={styles.sheetHandle} />
@@ -2512,11 +2583,13 @@ function DongoApp() {
             </ScrollView>
           </View>
         </View>
+        )}
       </Modal>
 
       {renderFamilyInfoModal()}
 
       <Modal visible={finishModal} animationType="fade" transparent onRequestClose={() => setFinishModal(false)}>
+        {finishModal && (
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.finishDialogIcon}><Check size={29} color={C.mintDark} /></View>
@@ -2534,9 +2607,11 @@ function DongoApp() {
             </View>
           </View>
         </View>
+        )}
       </Modal>
 
       <Modal visible={deleteStoryModal} animationType="fade" transparent onRequestClose={() => setDeleteStoryModal(false)}>
+        {deleteStoryModal && (
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.deleteDialogIcon}><AlertTriangle size={29} color={C.debt} /></View>
@@ -2549,9 +2624,11 @@ function DongoApp() {
             </View>
           </View>
         </View>
+        )}
       </Modal>
 
       <Modal visible={Boolean(deleteExpenseTarget)} animationType="fade" transparent onRequestClose={() => setDeleteExpenseTarget(null)}>
+        {deleteExpenseTarget && (
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.deleteDialogIcon}><AlertTriangle size={29} color={C.debt} /></View>
@@ -2568,9 +2645,11 @@ function DongoApp() {
             </View>
           </View>
         </View>
+        )}
       </Modal>
 
       <Modal visible={Boolean(deleteMemberTarget)} animationType="fade" transparent onRequestClose={() => setDeleteMemberTarget(null)}>
+        {deleteMemberTarget && (
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.deleteDialogIcon}><Trash2 size={27} color={C.debt} /></View>
@@ -2582,9 +2661,11 @@ function DongoApp() {
             </View>
           </View>
         </View>
+        )}
       </Modal>
 
       <Modal visible={signOutModal} animationType="fade" transparent onRequestClose={() => setSignOutModal(false)}>
+        {signOutModal && (
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.deleteDialogIcon}><AlertTriangle size={29} color={C.debt} /></View>
@@ -2599,9 +2680,11 @@ function DongoApp() {
             </View>
           </View>
         </View>
+        )}
       </Modal>
 
       <Modal visible={Boolean(pendingTransfer)} animationType="fade" transparent onRequestClose={() => setPendingTransfer(null)}>
+        {pendingTransfer && (
         <View style={[styles.centeredBackdrop, { paddingBottom: 22 + bottomInset }]}>
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.finishDialogIcon}><HandCoins size={28} color={C.mintDark} /></View>
@@ -2618,9 +2701,11 @@ function DongoApp() {
             </View>
           </View>
         </View>
+        )}
       </Modal>
 
       <Modal visible={editMemberModal} animationType="fade" transparent onRequestClose={() => setEditMemberModal(false)}>
+        {editMemberModal && (
         <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Pencil size={24} color={C.purple} /></View>
@@ -2666,9 +2751,11 @@ function DongoApp() {
             </View>
           </View>
         </ScrollView>
+        )}
       </Modal>
 
       <Modal visible={expenseModal} animationType="slide" transparent onRequestClose={() => { setExpenseModal(false); setEditingExpense(null); }}>
+        {expenseModal && (
         <View style={[styles.modalBackdrop, { paddingBottom: bottomInset }]}>
           <View style={[styles.sheet, { height: sheetHeight }]} accessibilityViewIsModal>
             <View style={styles.sheetHandle} />
@@ -2803,9 +2890,11 @@ function DongoApp() {
             </View>
           </View>
         </View>
+        )}
       </Modal>
 
       <Modal visible={memberModal} animationType="fade" transparent onRequestClose={() => setMemberModal(false)}>
+        {memberModal && (
         <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Users size={26} color={C.purple} /></View>
@@ -2846,9 +2935,11 @@ function DongoApp() {
             )}
           </View>
         </ScrollView>
+        )}
       </Modal>
 
       <Modal visible={joinModal} animationType="fade" transparent onRequestClose={() => setJoinModal(false)}>
+        {joinModal && (
         <ScrollView style={styles.centeredScroll} contentContainerStyle={[styles.centeredBackdropContent, { paddingBottom: 22 + bottomInset }]} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><UserPlus size={26} color={C.purple} /></View>
@@ -2871,6 +2962,7 @@ function DongoApp() {
             </View>
           </View>
         </ScrollView>
+        )}
       </Modal>
     </View>
   );
@@ -3135,6 +3227,7 @@ const styles = StyleSheet.create({
   splitHeaderCopy: { flex: 1 },
   selectAllButton: { alignSelf: 'flex-end', minHeight: 44, borderRadius: 13, backgroundColor: C.purplePale, paddingHorizontal: 13, flexDirection: 'row-reverse', alignItems: 'center', gap: 6, marginTop: 9 },
   selectAllText: { fontFamily: F.bold, fontSize: 11, color: C.purple },
+  peopleQuestion: { fontFamily: F.black, fontSize: 15, color: C.ink, textAlign: 'right', marginTop: 6, marginBottom: 2 },
   shareModeTabs: { flexDirection: 'row-reverse', gap: 8, marginTop: 4 },
   shareModeTab: { flex: 1, minHeight: 72, borderRadius: 17, borderWidth: 1.5, borderColor: C.line, backgroundColor: C.paper, paddingHorizontal: 11, paddingVertical: 10, justifyContent: 'center', gap: 3 },
   shareModeTabActive: { borderColor: C.purple, backgroundColor: C.purplePale },
@@ -3158,9 +3251,6 @@ const styles = StyleSheet.create({
   peopleList: { gap: 8, marginTop: 14 },
   selfRowName: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
   peopleIntro: { flexDirection: 'row-reverse', gap: 10, borderRadius: 18, backgroundColor: C.purplePale, padding: 14, marginTop: 4 },
-  peopleIntroIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center' },
-  peopleIntroCopy: { flex: 1, gap: 4 },
-  peopleIntroTitle: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
   peopleIntroText: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 19, textAlign: 'right' },
   companionRemove: { width: 44, height: 44, borderRadius: 12, backgroundColor: C.debtPale, alignItems: 'center', justifyContent: 'center' },
   addCompanionButton: { minHeight: 48, borderRadius: 16, borderWidth: 1.5, borderColor: '#D7CEF8', backgroundColor: C.purplePale, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 7, marginTop: 10 },
