@@ -925,6 +925,9 @@ function DongoApp() {
   /** Step one asks what the outing is; step two asks who is on it. */
   function goToPeopleStep() {
     if (!newStoryName.trim() || cloudBusy) return;
+    // One field already waiting, so the next move is to type rather than to
+    // find a button first.
+    setNewCompanionNames((current) => (current.length ? current : ['']));
     setStoryStep(2);
   }
 
@@ -1561,7 +1564,7 @@ function DongoApp() {
         <View style={styles.peopleIntro}>
           <View style={styles.peopleIntroIcon}><Users size={19} color={C.purple} /></View>
           <View style={styles.peopleIntroCopy}>
-            <AppText style={styles.peopleIntroTitle}>کی‌ها توی «{newStoryName.trim()}» بودند؟</AppText>
+            <AppText style={styles.peopleIntroTitle}>کی‌ها توی «{newStoryName.trim()}» هستند؟</AppText>
             <AppText style={styles.peopleIntroText}>اسم همه را بنویس؛ خرج‌ها بین همین‌ها تقسیم می‌شود. لازم نیست آن‌ها دنگودونگ را نصب کنند.</AppText>
           </View>
         </View>
@@ -1601,7 +1604,9 @@ function DongoApp() {
           </Pressable>
           <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => void createStory()} style={[styles.createStoryButtonGrow, cloudBusy && styles.saveButtonDisabled]}>
             <Check size={20} color="#FFFFFF" />
-            <AppText style={styles.saveButtonText}>ساخت ماجرا برای {faNumber.format(headcount)} نفر</AppText>
+            <AppText style={styles.saveButtonText}>{headcount === 1
+              ? 'فعلاً فقط خودم'
+              : `ساخت ماجرا برای ${faNumber.format(headcount)} نفر`}</AppText>
           </Pressable>
         </View>
       </>
@@ -2567,7 +2572,7 @@ function DongoApp() {
                   {members.some((member) => (member.shareUnits ?? 1) > 1) ? (
                     <View style={styles.householdAccountsList}>
                       {members.map((member) => <View key={member.id} style={styles.householdAccountCard}>
-                        <View style={styles.householdAccountHead}><Avatar member={member} size={36} /><View style={styles.householdAccountCopy}><AppText style={styles.householdAccountName}>{member.isMe ? 'حساب من' : member.name}</AppText><AppText style={styles.householdAccountHint}>{(member.shareUnits ?? 1) > 1 ? `${faNumber.format(member.shareUnits ?? 1)} نفر در این حساب` : 'یک نفر'}</AppText></View></View>
+                        <View style={styles.householdAccountHead}><Avatar member={member} size={36} /><View style={styles.householdAccountCopy}><AppText style={styles.householdAccountName}>{member.isMe ? (accountName.trim() || 'من') : member.name}</AppText><AppText style={styles.householdAccountHint}>{(member.shareUnits ?? 1) > 1 ? `${faNumber.format(member.shareUnits ?? 1)} نفر در این حساب` : 'یک نفر'}</AppText></View></View>
                         <View style={styles.personNameChips}>{expensePeople.filter((person) => person.memberId === member.id).map((person) => {
                           const active = selectedPersonIds.includes(person.id);
                           return <Pressable key={person.id} accessibilityRole="checkbox" accessibilityState={{ checked: active }} onPress={() => toggleExpensePerson(person.id)} style={[styles.personNameChip, active && styles.personNameChipActive]}><AppText style={[styles.personNameChipText, active && styles.personNameChipTextActive]}>{person.name}</AppText>{active && <Check size={12} color="#FFFFFF" />}</Pressable>;
@@ -2585,7 +2590,7 @@ function DongoApp() {
               ) : (
                 <View style={styles.shareList}>
                   {members.map((member) => <View key={member.id} style={styles.householdShareGroup}>
-                    <View style={styles.householdAccountHead}><Avatar member={member} size={36} /><View style={styles.householdAccountCopy}><AppText style={styles.householdAccountName}>{member.isMe ? 'حساب من' : member.name}</AppText><AppText style={styles.householdAccountHint}>مبلغ هر فرد را جدا وارد کن</AppText></View></View>
+                    <View style={styles.householdAccountHead}><Avatar member={member} size={36} /><View style={styles.householdAccountCopy}><AppText style={styles.householdAccountName}>{member.isMe ? (accountName.trim() || 'من') : member.name}</AppText><AppText style={styles.householdAccountHint}>مبلغ هر فرد را جدا وارد کن</AppText></View></View>
                     {expensePeople.filter((person) => person.memberId === member.id).map((person) => <View key={person.id} style={styles.personShareRow}>
                       <View style={styles.personShareIdentity}><View style={styles.personMiniAvatar}><AppText style={styles.personMiniAvatarText}>{initials(person.name)}</AppText></View><AppText style={styles.personShareName}>{person.name}</AppText></View>
                       <View style={styles.shareFields}>
