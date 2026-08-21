@@ -2,7 +2,7 @@
   "expo": {
     "name": "دنگودونگ",
     "slug": "dangodong",
-    "version": "1.26.3",
+    "version": "1.26.4",
     "icon": "./assets/app-icon-v2.png",
     "orientation": "portrait",
     "userInterfaceStyle": "light",
@@ -13,13 +13,20 @@
     },
     "android": {
       "package": "com.dong.mobile",
-      "versionCode": 47,
+      "versionCode": 48,
       "adaptiveIcon": {
         "foregroundImage": "./assets/app-icon-v2.png",
         "backgroundColor": "#FFF4E6"
       },
       "softwareKeyboardLayoutMode": "resize",
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "blockedPermissions": [
+        "android.permission.DUMP",
+        "android.permission.SYSTEM_ALERT_WINDOW",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.CHANGE_WIFI_STATE"
+      ]
     },
     "plugins": [
       "expo-font"
