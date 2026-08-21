@@ -1579,7 +1579,7 @@ function DongoApp() {
               return <Pressable key={template.id} accessibilityRole="radio" accessibilityState={{ selected: active }} onPress={() => setNewStoryTemplate(template.id)} style={[styles.storyTemplate, active && styles.storyTemplateActive]}><AppText style={styles.storyTemplateEmoji}>{template.emoji}</AppText><AppText style={[styles.storyTemplateText, active && styles.storyTemplateTextActive]}>{template.label}</AppText>{active && <View style={styles.storyTemplateCheck}><Check size={11} color="#FFFFFF" /></View>}</Pressable>;
             })}
           </View>
-          <AppText style={styles.storyHelper}>نوع ماجرا فقط برای ظاهر و پیشنهادهای اولیه است؛ محاسبه دنگ‌ها همیشه یکسان انجام می‌شود.</AppText>
+          <AppText style={styles.storyHelper}>این فقط برای ظاهرش است؛ توی حساب‌وکتاب هیچ فرقی نمی‌کند.</AppText>
 
           <Pressable accessibilityRole="button" disabled={!newStoryName.trim()} onPress={goToPeopleStep} style={[styles.createStoryButton, !newStoryName.trim() && styles.saveButtonDisabled]}>
             <ArrowLeft size={20} color="#FFFFFF" />
@@ -1595,31 +1595,51 @@ function DongoApp() {
         + namedCompanions.reduce((sum, item) => sum + 1 + item.subs.filter((sub) => sub.trim()).length, 0)
       : 1 + namedCompanions.length;
 
-    function renderSubNames(subs: string[], onChange: (index: number, value: string) => void, onRemove: (index: number) => void, onAdd: () => void) {
+    // A filled circle with the first letter is the clearest "this one is
+    // written down" signal there is; an empty outline reads as a blank waiting
+    // to be filled. Testers could not tell the two apart from the box colours.
+    function renderInitial(name: string, color: string, size = 34) {
+      const trimmed = name.trim();
+      return (
+        <View style={[
+          styles.peopleInitial,
+          { width: size, height: size, borderRadius: size * 0.36 },
+          trimmed ? { backgroundColor: color } : styles.peopleInitialEmpty,
+        ]}>
+          {trimmed ? <AppText style={styles.peopleInitialText}>{trimmed.slice(0, 1)}</AppText> : null}
+        </View>
+      );
+    }
+
+    function renderSubNames(headName: string, color: string, subs: string[], onChange: (index: number, value: string) => void, onRemove: (index: number) => void, onAdd: () => void) {
+      const owner = headName.trim();
       return (
         <View style={styles.subList}>
           {subs.map((value, subIndex) => (
             <View key={subIndex} style={styles.subRow}>
+              {renderInitial(value, color, 28)}
               <TextInput
                 value={value}
                 onChangeText={(text) => onChange(subIndex, text)}
                 style={styles.subNameInput}
-                placeholder="اسم عضو خانواده"
+                placeholder={owner ? `یکی از خانوادهٔ ${owner}` : 'اسم عضو خانواده'}
                 placeholderTextColor={C.faint}
                 textAlign="right"
               />
-              <Pressable accessibilityRole="button" accessibilityLabel="حذف عضو خانواده" onPress={() => onRemove(subIndex)} style={styles.subRemove}>
+              <Pressable accessibilityRole="button" accessibilityLabel="حذف این عضو" onPress={() => onRemove(subIndex)} style={styles.subRemove}>
                 <X size={13} color={C.debt} />
               </Pressable>
             </View>
           ))}
           <Pressable accessibilityRole="button" onPress={onAdd} style={styles.addSubButton}>
             <Plus size={14} color={C.purple} />
-            <AppText style={styles.addSubText}>افزودن عضو خانواده</AppText>
+            <AppText style={styles.addSubText}>{owner ? `افزودن عضو خانوادهٔ ${owner}` : 'افزودن عضو خانواده'}</AppText>
           </Pressable>
         </View>
       );
     }
+
+    const myName = accountName.trim();
 
     return (
       <>
@@ -1645,16 +1665,19 @@ function DongoApp() {
         </View>
 
         <AppText style={styles.peopleIntroText}>{splitByFamily
-          ? 'اسم کسی را بنویس که پول می‌دهد، و زیرش اسم افراد خانواده‌اش را. سهم هر نفر جدا حساب می‌شود، ولی آخرش یک مبلغ با سرپرست خانواده تسویه می‌شود.'
+          ? 'برای هر خانواده، اسم سرپرست را بنویس — کسی که آخرش تسویه می‌کند — و زیرش بقیهٔ خانواده را. سهم هر نفر جدا حساب می‌شود، ولی یک مبلغ با سرپرست تسویه می‌شود.'
           : 'اسم همه را بنویس. سهم هر نفر جدا حساب می‌شود و هر کس دنگ خودش را می‌دهد.'}</AppText>
 
         <View style={styles.peopleList}>
-          <View style={styles.selfBlock}>
-            <View style={styles.selfRow}>
-              <AppText style={styles.selfRowName}>{accountName.trim() || 'من'}</AppText>
+          <View style={[styles.peopleCard, styles.peopleCardSelf]}>
+            <View style={styles.peopleCardHead}>
+              {renderInitial(myName || 'ت', AVATAR_COLORS[0])}
+              <AppText style={styles.selfRowName}>{myName || 'خودت'}</AppText>
               <View style={styles.meBadge}><AppText style={styles.meText}>تو</AppText></View>
             </View>
             {splitByFamily && renderSubNames(
+              myName,
+              AVATAR_COLORS[0],
               ownerSubNames,
               (index, value) => setOwnerSubNames((current) => current.map((item, i) => (i === index ? value : item))),
               (index) => setOwnerSubNames((current) => current.filter((_, i) => i !== index)),
@@ -1662,30 +1685,36 @@ function DongoApp() {
             )}
           </View>
 
-          {newCompanions.map((companion, index) => (
-            <View key={index} style={styles.companionBlock}>
-              <View style={styles.familyInputRow}>
-                <TextInput
-                  autoFocus={index === newCompanions.length - 1 && !companion.name}
-                  value={companion.name}
-                  onChangeText={(text) => changeCompanionName(index, text)}
-                  style={styles.familyNameInput}
-                  placeholder={splitByFamily ? 'اسم کسی که پول می‌دهد' : `اسم نفر ${faNumber.format(index + 2)}`}
-                  placeholderTextColor={C.faint}
-                  textAlign="right"
-                />
-                <Pressable accessibilityRole="button" accessibilityLabel={`حذف نفر ${faNumber.format(index + 2)}`} onPress={() => removeCompanionField(index)} style={styles.companionRemove}>
-                  <X size={15} color={C.debt} />
-                </Pressable>
+          {newCompanions.map((companion, index) => {
+            const color = AVATAR_COLORS[(index + 1) % AVATAR_COLORS.length];
+            return (
+              <View key={index} style={styles.peopleCard}>
+                <View style={styles.peopleCardHead}>
+                  {renderInitial(companion.name, color)}
+                  <TextInput
+                    autoFocus={index === newCompanions.length - 1 && !companion.name}
+                    value={companion.name}
+                    onChangeText={(text) => changeCompanionName(index, text)}
+                    style={styles.headNameInput}
+                    placeholder={splitByFamily ? 'سرپرست خانواده' : `اسم نفر ${faNumber.format(index + 2)}`}
+                    placeholderTextColor={C.faint}
+                    textAlign="right"
+                  />
+                  <Pressable accessibilityRole="button" accessibilityLabel={`حذف نفر ${faNumber.format(index + 2)}`} onPress={() => removeCompanionField(index)} style={styles.companionRemove}>
+                    <X size={15} color={C.debt} />
+                  </Pressable>
+                </View>
+                {splitByFamily && renderSubNames(
+                  companion.name,
+                  color,
+                  companion.subs,
+                  (subIndex, value) => changeCompanionSub(index, subIndex, value),
+                  (subIndex) => removeCompanionSub(index, subIndex),
+                  () => addCompanionSub(index),
+                )}
               </View>
-              {splitByFamily && renderSubNames(
-                companion.subs,
-                (subIndex, value) => changeCompanionSub(index, subIndex, value),
-                (subIndex) => removeCompanionSub(index, subIndex),
-                () => addCompanionSub(index),
-              )}
-            </View>
-          ))}
+            );
+          })}
         </View>
 
         <Pressable accessibilityRole="button" onPress={() => setNewCompanions((current) => [...current, { name: '', subs: [] }])} style={styles.addCompanionButton}>
@@ -1752,7 +1781,7 @@ function DongoApp() {
           style={styles.accountHero}
         >
           <View style={styles.accountHeroIcon}><UserRound size={30} color="#FFFFFF" /></View>
-          <View style={styles.accountHeroCopy}><AppText style={styles.accountTitle}>حساب من</AppText><AppText style={styles.accountSubtitle}>این اطلاعات فقط برای اینکه بقیه بدانند دنگت را به کجا بریزند استفاده می‌شود.</AppText></View>
+          <View style={styles.accountHeroCopy}><AppText style={styles.accountTitle}>حساب من</AppText><AppText style={styles.accountSubtitle}>این‌ها را فقط برای این می‌پرسیم که بقیه بدانند دنگت را کجا بریزند.</AppText></View>
         </Pressable>
         {adPanelOpen && (
           <View style={styles.adPanel}>
@@ -1790,12 +1819,12 @@ function DongoApp() {
           {accountPhone ? (
             <View style={styles.readonlyField}>
               <AppText style={styles.readonlyValue}>{accountPhone}</AppText>
-              <AppText style={styles.readonlyHint}>اطلاعاتت به این شماره گره خورده؛ روی گوشی جدید با همین شماره وارد شو تا همه‌چیز برگردد.</AppText>
+              <AppText style={styles.readonlyHint}>حسابت به این شماره وصل است. روی گوشی جدید با همین شماره وارد شو تا همه‌چیز برگردد.</AppText>
             </View>
           ) : phoneStage === 'idle' ? (
             <View style={styles.phoneLinkBox}>
               <AppText style={styles.phoneLinkTitle}>هنوز شماره‌ای ثبت نکرده‌ای</AppText>
-              <AppText style={styles.phoneLinkText}>ثبت شماره اختیاری است، اما بدون آن اگر گوشی‌ات را عوض کنی یا اپ را پاک کنی، ماجراها و حساب‌هایت برنمی‌گردند.</AppText>
+              <AppText style={styles.phoneLinkText}>شماره دادن اجباری نیست، ولی اگر ندهی و گوشی‌ات عوض شود یا اپ را پاک کنی، همه‌چیز از دست می‌رود.</AppText>
               <TextInput
                 accessibilityLabel="شماره موبایل برای ثبت"
                 value={phoneInput}
@@ -1884,7 +1913,7 @@ function DongoApp() {
             {currentBalance !== 0 && <AppText numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.55} style={styles.heroAmount}>{formatMoney(Math.abs(currentBalance))}</AppText>}
             <AppText style={styles.heroHint}>{currentBalance === 0
               ? 'نه از کسی طلب داری، نه به کسی بدهکاری.'
-              : 'برای دیدن اینکه چه کسی به چه کسی بدهد، پایین صفحه «تسویه» را بزن.'}</AppText>
+              : 'برای اینکه ببینی چه کسی به چه کسی بدهد، پایین «تسویه» را بزن.'}</AppText>
           </View>
           <Image source={require('./assets/dong-mascot-optimized.png')} style={styles.heroMascot} resizeMode="contain" />
         </LinearGradient>
@@ -1971,7 +2000,7 @@ function DongoApp() {
         {members.length === 1 && !storyCompleted && (
           <View style={styles.loneMemberNotice}>
             <AppText style={styles.loneMemberTitle}>فعلاً فقط خودت توی این ماجرایی</AppText>
-            <AppText style={styles.loneMemberText}>اسم بقیه را اضافه کن تا دنگ‌ها بین همه تقسیم شود. لازم نیست آن‌ها اپ نصب کنند؛ حسابشان دست توست.</AppText>
+            <AppText style={styles.loneMemberText}>اسم بقیه را اضافه کن تا دنگ بین همه تقسیم شود. لازم نیست اپ داشته باشند؛ حسابشان دست توست.</AppText>
             <Pressable accessibilityRole="button" onPress={openNewMemberModal} style={styles.loneMemberButton}>
               <UserPlus size={17} color="#FFFFFF" />
               <AppText style={styles.loneMemberButtonText}>افزودن همراه‌ها</AppText>
@@ -1995,7 +2024,7 @@ function DongoApp() {
           )}
         </View>
         {storyCompleted ? (
-          <View style={styles.finishedNotice}><View style={styles.finishedNoticeIcon}><Check size={20} color={C.mintDark} /></View><View style={styles.finishedNoticeCopy}><AppText style={styles.finishedNoticeTitle}>این ماجرا تمام شده</AppText><AppText style={styles.finishedNoticeText}>همه‌چیز برای مرور نگه داشته شده؛ خرج تازه‌ای به آن اضافه نمی‌شود.</AppText></View></View>
+          <View style={styles.finishedNotice}><View style={styles.finishedNoticeIcon}><Check size={20} color={C.mintDark} /></View><View style={styles.finishedNoticeCopy}><AppText style={styles.finishedNoticeTitle}>این ماجرا تمام شده</AppText><AppText style={styles.finishedNoticeText}>همه‌چیزش می‌ماند تا هر وقت خواستی ببینی، ولی دیگر نمی‌شود خرج تازه اضافه کرد.</AppText></View></View>
         ) : (
           <Pressable accessibilityRole="button" onPress={() => setFinishModal(true)} style={styles.finishStoryButton}><Check size={19} color={C.mintDark} /><View style={styles.finishStoryCopy}><AppText style={styles.finishStoryTitle}>اتمام ماجرا</AppText><AppText style={styles.finishStoryText}>وقتی همه خرج‌ها ثبت شد و همه تسویه کردند، ماجرا را ببند.</AppText></View></Pressable>
         )}
@@ -2090,7 +2119,7 @@ function DongoApp() {
             </Pressable>
             <AppText style={styles.cardPromptHint}>{typedCardDigits > 0 && typedCardDigits < 16
               ? `${faNumber.format(typedCardDigits)} از ۱۶ رقم وارد شده.`
-              : 'فقط شماره کارت ذخیره می‌شود؛ رمز، CVV2 و تاریخ انقضا هرگز پرسیده نمی‌شوند.'}</AppText>
+              : 'فقط شماره کارت. رمز و CVV2 و تاریخ انقضا را نه می‌پرسیم نه ذخیره می‌کنیم.'}</AppText>
           </View>
         )}
         <View style={styles.settlementHero}>
@@ -2103,8 +2132,8 @@ function DongoApp() {
               ? `${faNumber.format(transfers.length)} پرداخت مانده تا حساب همه صاف شود`
               : 'حساب همه صاف است'}</AppText>
             <AppText style={styles.settlementDescription}>{transfers.length
-              ? 'پایین لیست شده که هر کس چقدر و به چه کسی بدهد. بعد از هر پرداخت، همان‌جا ثبتش کن.'
-              : 'هیچ‌کس به کسی بدهکار نیست. اگر خرج تازه‌ای ثبت شود، دوباره اینجا حساب می‌شود.'}</AppText>
+              ? 'پایین نوشته چه کسی به چه کسی چقدر بدهد. هر پرداختی که انجام شد، همان‌جا ثبتش کن.'
+              : 'حساب همه با هم صاف است. تا خرج تازه‌ای ثبت نشود، اینجا کاری نداری.'}</AppText>
           </View>
         </View>
 
@@ -2173,7 +2202,7 @@ function DongoApp() {
                 ) : (
                   <View style={styles.transferCardMissing}>
                     <AppText style={styles.transferCardMissingText}>{to?.isMe
-                      ? 'تو هنوز شماره کارتت را ثبت نکرده‌ای؛ از بالای همین صفحه ثبتش کن تا بقیه بتوانند دنگت را بریزند.'
+                      ? 'هنوز شماره کارتت را نداده‌ای. از بالای همین صفحه واردش کن تا بقیه بتوانند دنگت را بریزند.'
                       : to?.kind === 'guest'
                         ? `${to?.name} در اپ نیست؛ شماره کارتش را باید خودت بپرسی.`
                         : `${to?.name} هنوز شماره کارتی ثبت نکرده.`}</AppText>
@@ -2213,8 +2242,8 @@ function DongoApp() {
           </View>
           <View style={styles.welcomeCopy}>
             <AppText style={styles.welcomeTitle}>هنوز هیچ ماجرایی نساختی</AppText>
-            <AppText style={styles.welcomeText}>هر شام، سفر یا خرید مشترکی که خرجش را با هم حساب می‌کنید، اینجا یک «ماجرا» است.</AppText>
-            <AppText style={styles.welcomeText}>یکی بساز و اسم همراه‌هایت را وارد کن. لازم نیست آن‌ها اپ نصب کنند؛ حساب همه دست توست.</AppText>
+            <AppText style={styles.welcomeText}>هر شام و سفر و خرید مشترکی که خرجش را با هم حساب می‌کنید، اینجا یک «ماجرا» است.</AppText>
+            <AppText style={styles.welcomeText}>یکی بساز و اسم بقیه را بنویس. لازم نیست اپ داشته باشند؛ حساب همه دست توست.</AppText>
           </View>
           <Pressable accessibilityRole="button" style={styles.primaryStoryButton} onPress={openNewStory}>
             <Plus size={21} color="#FFFFFF" />
@@ -2481,7 +2510,7 @@ function DongoApp() {
               <View style={styles.finishSummaryDivider} />
               <View style={styles.finishSummaryItem}><AppText style={styles.finishSummaryLabel}>پرداخت مانده</AppText><AppText style={styles.finishSummaryValue}>{faNumber.format(transfers.length)} پرداخت</AppText></View>
             </View>
-            {transfers.length > 0 && <View style={styles.finishWarning}><AppText style={styles.finishWarningText}>تسویه‌ها هنوز باقی مانده‌اند؛ بعداً هم می‌توانی آن‌ها را از صفحه تسویه ببینی.</AppText></View>}
+            {transfers.length > 0 && <View style={styles.finishWarning}><AppText style={styles.finishWarningText}>هنوز چند تا پرداخت مانده. نگران نباش، بعداً هم از صفحه تسویه می‌بینی‌شان.</AppText></View>}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setFinishModal(false)}><AppText style={styles.dialogCancelText}>فعلاً نه</AppText></Pressable>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.finishConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={finishStory}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال بستن…' : 'بله، تمامش کن'}</AppText></Pressable>
@@ -2529,7 +2558,7 @@ function DongoApp() {
           <View style={styles.finishDialog} accessibilityViewIsModal>
             <View style={styles.deleteDialogIcon}><Trash2 size={27} color={C.debt} /></View>
             <AppText style={styles.dialogTitle}>«{deleteMemberTarget?.name}» حذف شود؟</AppText>
-            <AppText style={styles.finishDialogText}>از این ماجرا بیرون می‌رود و دیگر در تقسیم خرج‌های بعدی حساب نمی‌شود. اگر در خرجی شرکت داشته باشد، اپ اجازه حذفش را نمی‌دهد.</AppText>
+            <AppText style={styles.finishDialogText}>از ماجرا بیرون می‌رود و توی خرج‌های بعدی حساب نمی‌شود. اگر توی خرجی باشد، اپ اجازه نمی‌دهد حذفش کنی.</AppText>
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setDeleteMemberTarget(null)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (deleteMemberTarget) void removeGuestMember(deleteMemberTarget); }}><Trash2 size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال حذف…' : 'بله، حذف کن'}</AppText></Pressable>
@@ -2545,8 +2574,8 @@ function DongoApp() {
             <AppText style={styles.dialogTitle}>از حساب خارج شوی؟</AppText>
             <AppText style={styles.finishDialogText}>{accountPhone
               ? `بعداً با شماره ${accountPhone} دوباره وارد شو تا همه ماجراها و خرج‌هایت برگردند.`
-              : 'چون هنوز شماره موبایلی ثبت نکرده‌ای، هیچ راهی برای ورود دوباره به این حساب نیست.'}</AppText>
-            {!accountPhone && <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>همه ماجراها، خرج‌ها و تسویه‌هایت از دسترس خارج می‌شوند و برنمی‌گردند.</AppText></View>}
+              : 'چون شماره موبایل نداده‌ای، دیگر هیچ راهی برای برگشتن به این حساب نیست.'}</AppText>
+            {!accountPhone && <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>همه ماجراها، خرج‌ها و تسویه‌هایت پاک می‌شوند و دیگر برنمی‌گردند.</AppText></View>}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setSignOutModal(false)}><AppText style={styles.dialogCancelText}>{accountPhone ? 'انصراف' : 'می‌مانم'}</AppText></Pressable>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => void signOut()}><LogOut size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال خروج…' : 'بله، خارج شو'}</AppText></Pressable>
@@ -2565,7 +2594,7 @@ function DongoApp() {
                 ? `ثبت می‌شود که «${memberById(pendingTransfer.fromId)?.name ?? ''}» مبلغ ${formatMoney(pendingTransfer.amount)} را به «${memberById(pendingTransfer.toId)?.name ?? ''}» پرداخت کرده و مانده‌حساب همه اعضا به‌روز می‌شود.`
                 : ''}
             </AppText>
-            <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>این ثبت برای همه اعضای ماجرا دیده می‌شود و خودت نمی‌توانی آن را پس بگیری.</AppText></View>
+            <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>بقیه هم این را می‌بینند و بعدش نمی‌شود پسش گرفت.</AppText></View>
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setPendingTransfer(null)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.finishConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (pendingTransfer) void markTransferPaid(pendingTransfer); }}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال ثبت…' : 'بله، ثبت کن'}</AppText></Pressable>
@@ -2579,13 +2608,13 @@ function DongoApp() {
           <View style={styles.dialog} accessibilityViewIsModal>
             <View style={styles.dialogIcon}><Pencil size={24} color={C.purple} /></View>
             <AppText style={styles.dialogTitle}>ویرایش این نفر</AppText>
-            <AppText style={styles.dialogText}>{editingMember?.kind === 'guest' ? 'اسم و تعداد نفراتش را می‌توانی عوض کنی.' : 'اسمش را خودش در حسابش تعیین می‌کند؛ فقط تعداد نفراتش را می‌توانی عوض کنی.'}</AppText>
+            <AppText style={styles.dialogText}>{editingMember?.kind === 'guest' ? 'اسم و تعداد نفراتش را می‌توانی عوض کنی.' : 'اسمش را خودش توی حسابش گذاشته و تو نمی‌توانی عوضش کنی.'}</AppText>
             <TextInput editable={editingMember?.kind === 'guest'} style={[styles.formInput, editingMember?.kind !== 'guest' && styles.readonlyInput]} value={editMemberName} onChangeText={setEditMemberName} placeholder="اسم این نفر" placeholderTextColor={C.faint} textAlign="right" />
             {/* Same shape as step two of creating a story: names, not a count.
                 A card with nobody under it simply has an empty list. */}
             <View style={styles.editFamilySection}>
               <AppText style={styles.formLabelNoMargin}>چه کسانی دنگشان را {editingMember?.isMe ? 'تو می‌دهی' : 'او می‌دهد'}؟</AppText>
-              <AppText style={styles.formHelper}>اگر کسی زیرمجموعه‌اش نیست، این قسمت را خالی بگذار.</AppText>
+              <AppText style={styles.formHelper}>اگر کسی با او حساب نمی‌کند، اینجا را خالی بگذار.</AppText>
               <View style={styles.subList}>
                 {editHouseholdNameInputs.map((value, index) => (
                   <View key={index} style={styles.subRow}>
@@ -2649,7 +2678,7 @@ function DongoApp() {
                     autoFocus
                   />
                 </View>
-                {numericAmount > 0 && <AppText style={styles.amountHint}>سهم تقریبی هر نفر: {formatMoney(sharePreview)}</AppText>}
+                {numericAmount > 0 && <AppText style={styles.amountHint}>سهم هر نفر حدوداً {formatMoney(sharePreview)}</AppText>}
               </View>
 
               <AppText style={styles.formLabel}>خرجِ چی بود؟</AppText>
@@ -2686,7 +2715,7 @@ function DongoApp() {
 
               {splitMode === 'equal' ? (
                 <>
-                  <View style={styles.splitHeader}><View style={styles.equalBadge}><AppText style={styles.equalBadgeText}>حدوداً هر نفر: {formatMoney(sharePreview)}</AppText></View><View style={styles.splitHeaderCopy}><AppText style={styles.formLabelNoMargin}>چه کسانی در این خرج بودند؟</AppText><AppText style={styles.formHelper}>همه از اول انتخاب‌اند. اگر کسی نبوده، اسمش را بزن تا خاموش شود.</AppText></View></View>
+                  <View style={styles.splitHeader}><View style={styles.equalBadge}><AppText style={styles.equalBadgeText}>سهم هر نفر حدوداً {formatMoney(sharePreview)}</AppText></View><View style={styles.splitHeaderCopy}><AppText style={styles.formLabelNoMargin}>چه کسانی در این خرج بودند؟</AppText><AppText style={styles.formHelper}>همه از اول تیک خورده‌اند. هر کس نبوده، اسمش را بزن تا برداشته شود.</AppText></View></View>
                   {/* Unticking people is easy to overshoot, so there is a way back. */}
                   {selectedPersonIds.length < expensePeople.length && (
                     <Pressable accessibilityRole="button" onPress={() => setSelectedPersonIds(expensePeople.map((person) => person.id))} style={styles.selectAllButton}>
@@ -2769,7 +2798,7 @@ function DongoApp() {
             </View>
             {memberMode === 'guest' ? (
               <>
-                <AppText style={styles.dialogText}>اسم کسی که می‌خواهی به این ماجرا اضافه شود. لازم نیست اپ داشته باشد.</AppText>
+                <AppText style={styles.dialogText}>اسم کسی که می‌خواهی اضافه کنی. لازم نیست اپ داشته باشد.</AppText>
                 <TextInput accessibilityLabel="اسم عضو جدید" style={styles.formInput} value={newMemberName} onChangeText={setNewMemberName} placeholder="مثلاً رضا" placeholderTextColor={C.faint} textAlign="right" autoFocus />
                 {newMemberFamilyOpen || Number(newMemberUnits || 1) > 1 ? (
                   <>
@@ -2788,7 +2817,7 @@ function DongoApp() {
               </>
             ) : (
               <>
-                <AppText style={styles.dialogText}>این کد را برای کسی بفرست که دنگودونگ را نصب دارد؛ بعد از ورود، خودش به ماجرا اضافه می‌شود.</AppText>
+                <AppText style={styles.dialogText}>این کد را بفرست برای کسی که دنگودونگ دارد. وارد که شد، خودش می‌آید توی ماجرا.</AppText>
                 <View style={styles.inviteCodeCard}><AppText style={styles.inviteCodeLabel}>کد دعوت ماجرا</AppText><AppText selectable style={styles.inviteCodeValue}>{activeStory?.inviteCode ?? '--------'}</AppText></View>
                 <View style={styles.inviteActions}>
                   <Pressable accessibilityRole="button" style={styles.inviteSecondaryButton} onPress={copyInviteCode}><Copy size={17} color={C.purple} /><AppText style={styles.inviteSecondaryText}>کپی کد</AppText></Pressable>
@@ -3094,16 +3123,21 @@ const styles = StyleSheet.create({
   shareModeTabTitle: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
   shareModeTabTitleActive: { color: C.purple },
   shareModeTabHint: { fontFamily: F.medium, fontSize: 9, color: C.muted, lineHeight: 15, textAlign: 'right' },
-  selfBlock: { gap: 6 },
-  companionBlock: { gap: 6 },
-  subList: { gap: 6, paddingRight: 16, borderRightWidth: 2, borderRightColor: '#E3DCF6', marginRight: 6 },
-  subRow: { minHeight: 48, borderRadius: 13, backgroundColor: C.paper, borderWidth: 1, borderColor: C.line, padding: 6, flexDirection: 'row-reverse', alignItems: 'center', gap: 6 },
-  subNameInput: { flex: 1, minHeight: 36, borderRadius: 10, backgroundColor: C.canvas, color: C.ink, paddingHorizontal: 10, fontFamily: F.semi, fontSize: 11, writingDirection: 'rtl' },
+  peopleCard: { borderRadius: 18, backgroundColor: C.paper, borderWidth: 1.5, borderColor: C.line, padding: 10, gap: 8 },
+  peopleCardSelf: { backgroundColor: C.purplePale, borderColor: '#CFC4F4' },
+  peopleCardHead: { flexDirection: 'row-reverse', alignItems: 'center', gap: 9 },
+  peopleInitial: { alignItems: 'center', justifyContent: 'center' },
+  peopleInitialEmpty: { backgroundColor: 'transparent', borderWidth: 1.5, borderColor: '#D6CFE4', borderStyle: 'dashed' },
+  peopleInitialText: { fontFamily: F.black, color: '#FFFFFF', fontSize: 14 },
+  headNameInput: { flex: 1, minHeight: 44, borderRadius: 13, backgroundColor: C.canvas, color: C.ink, paddingHorizontal: 12, fontFamily: F.bold, fontSize: 13, writingDirection: 'rtl' },
+  selfRow: { flex: 1 },
+  subList: { gap: 7, paddingRight: 12, marginRight: 16, borderRightWidth: 2, borderRightColor: '#E3DCF6' },
+  subRow: { minHeight: 50, borderRadius: 13, backgroundColor: C.canvas, borderWidth: 1, borderColor: C.line, paddingHorizontal: 8, flexDirection: 'row-reverse', alignItems: 'center', gap: 7 },
+  subNameInput: { flex: 1, minHeight: 38, color: C.ink, paddingHorizontal: 4, fontFamily: F.semi, fontSize: 12, writingDirection: 'rtl' },
   subRemove: { width: 36, height: 36, borderRadius: 11, backgroundColor: C.debtPale, alignItems: 'center', justifyContent: 'center' },
-  addSubButton: { minHeight: 44, borderRadius: 13, backgroundColor: C.purplePale, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  addSubButton: { minHeight: 44, borderRadius: 13, backgroundColor: C.purplePale, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 10 },
   addSubText: { fontFamily: F.bold, fontSize: 11, color: C.purple },
   peopleList: { gap: 8, marginTop: 14 },
-  selfRow: { minHeight: 57, borderRadius: 16, backgroundColor: C.purplePale, borderWidth: 1, borderColor: '#D7CEF8', paddingHorizontal: 14, flexDirection: 'row-reverse', alignItems: 'center', gap: 8 },
   selfRowName: { fontFamily: F.bold, fontSize: 12, color: C.ink, textAlign: 'right' },
   peopleIntro: { flexDirection: 'row-reverse', gap: 10, borderRadius: 18, backgroundColor: C.purplePale, padding: 14, marginTop: 4 },
   peopleIntroIcon: { width: 38, height: 38, borderRadius: 13, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center' },
