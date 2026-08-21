@@ -10,8 +10,9 @@ import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import * as LucideIcons from 'lucide-react-native';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   BackHandler,
   Image,
   Keyboard,
@@ -272,6 +273,16 @@ function categoryInfo(category?: ExpenseCategory) {
     color: C.purple,
     bg: C.purplePale,
   };
+}
+
+/**
+ * Saving goes to the server, and on a slow connection that is long enough for
+ * someone to decide the app is broken and press again. A button that is
+ * waiting says so by swapping its icon for a spinner.
+ */
+function ButtonBusy({ busy, color = '#FFFFFF', children }: { busy: boolean; color?: string; children: ReactNode }) {
+  if (busy) return <ActivityIndicator size="small" color={color} />;
+  return <>{children}</>;
 }
 
 function Avatar({ member, size = 42, border = false }: { member?: Member; size?: number; border?: boolean }) {
@@ -1728,8 +1739,8 @@ function DongoApp() {
             <AppText style={styles.storyBackText}>مرحله قبل</AppText>
           </Pressable>
           <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => void createStory()} style={[styles.createStoryButtonGrow, cloudBusy && styles.saveButtonDisabled]}>
-            <Check size={20} color="#FFFFFF" />
-            <AppText style={styles.saveButtonText}>{headcount === 1
+            <ButtonBusy busy={cloudBusy}><Check size={20} color="#FFFFFF" /></ButtonBusy>
+            <AppText style={styles.saveButtonText}>{cloudBusy ? 'در حال ساختن…' : headcount === 1
               ? 'فعلاً فقط خودم'
               : `ساخت ماجرا برای ${faNumber.format(headcount)} نفر`}</AppText>
           </Pressable>
@@ -1844,7 +1855,7 @@ function DongoApp() {
                 onPress={() => void startPhoneLink()}
                 style={({ pressed }) => [styles.phoneLinkButton, pressed && styles.pressed, (phoneBusy || !toIranPhone(phoneInput)) && styles.saveButtonDisabled]}
               >
-                <AppText style={styles.phoneLinkButtonText}>{phoneBusy ? 'در حال ارسال…' : 'ارسال کد تأیید'}</AppText>
+                <ButtonBusy busy={phoneBusy}><Check size={16} color="#FFFFFF" /></ButtonBusy><AppText style={styles.phoneLinkButtonText}>{phoneBusy ? 'در حال ارسال…' : 'ارسال کد تأیید'}</AppText>
               </Pressable>
             </View>
           ) : (
@@ -1874,7 +1885,7 @@ function DongoApp() {
                 onPress={() => void confirmPhoneLink()}
                 style={({ pressed }) => [styles.phoneLinkButton, pressed && styles.pressed, (phoneBusy || toLatinDigits(phoneOtp).length !== 6) && styles.saveButtonDisabled]}
               >
-                <AppText style={styles.phoneLinkButtonText}>{phoneBusy ? 'در حال بررسی…' : 'تأیید و ثبت شماره'}</AppText>
+                <ButtonBusy busy={phoneBusy}><Check size={16} color="#FFFFFF" /></ButtonBusy><AppText style={styles.phoneLinkButtonText}>{phoneBusy ? 'در حال بررسی…' : 'تأیید و ثبت شماره'}</AppText>
               </Pressable>
               <View style={styles.phoneLinkActions}>
                 <Pressable accessibilityRole="button" onPress={cancelPhoneLink}><AppText style={styles.phoneLinkSecondary}>انصراف</AppText></Pressable>
@@ -1886,7 +1897,7 @@ function DongoApp() {
           <TextInput accessibilityLabel="شماره کارت دریافت دونگ" value={accountCardNumber} onChangeText={(value) => setAccountCardNumber(normalizeDigits(value).slice(0, 16))} placeholder="۱۶ رقم بدون فاصله" placeholderTextColor={C.faint} keyboardType="number-pad" style={[styles.accountInput, styles.accountCardInput]} textAlign="center" />
           <AppText style={styles.accountHint}>رمز، CVV2 و تاریخ انقضا دریافت یا ذخیره نمی‌شوند.</AppText>
           {accountError ? <AppText style={styles.accountError}>{accountError}</AppText> : null}
-          <Pressable accessibilityRole="button" disabled={accountSaving} onPress={() => void saveAccount()} style={({ pressed }) => [styles.accountSaveButton, pressed && styles.pressed, accountSaving && styles.saveButtonDisabled]}><AppText style={styles.accountSaveText}>{accountSaving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}</AppText></Pressable>
+          <Pressable accessibilityRole="button" disabled={accountSaving} onPress={() => void saveAccount()} style={({ pressed }) => [styles.accountSaveButton, pressed && styles.pressed, accountSaving && styles.saveButtonDisabled]}><ButtonBusy busy={accountSaving}><Check size={17} color="#FFFFFF" /></ButtonBusy><AppText style={styles.accountSaveText}>{accountSaving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}</AppText></Pressable>
         </View>}
         <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => setSignOutModal(true)} style={({ pressed }) => [styles.accountLogoutButton, pressed && styles.pressed, cloudBusy && { opacity: 0.65 }]}><LogOut size={18} color={C.debt} /><AppText style={styles.accountLogoutText}>خروج از حساب</AppText></Pressable>
         {/* The ad diagnostics panel is support tooling, not a feature. It stays
@@ -2306,7 +2317,7 @@ function DongoApp() {
               )}
               <View style={styles.dialogActions}>
                 <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setJoinModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-                <Pressable accessibilityRole="button" disabled={!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><UserPlus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>پیوستن</AppText></Pressable>
+                <Pressable accessibilityRole="button" disabled={!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><ButtonBusy busy={cloudBusy}><UserPlus size={18} color="#FFFFFF" /></ButtonBusy><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال پیوستن…' : 'پیوستن'}</AppText></Pressable>
               </View>
             </View>
           </ScrollView>
@@ -2519,7 +2530,7 @@ function DongoApp() {
             {transfers.length > 0 && <View style={styles.finishWarning}><AppText style={styles.finishWarningText}>هنوز چند تا پرداخت مانده. نگران نباش، بعداً هم از صفحه تسویه می‌بینی‌شان.</AppText></View>}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setFinishModal(false)}><AppText style={styles.dialogCancelText}>فعلاً نه</AppText></Pressable>
-              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.finishConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={finishStory}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال بستن…' : 'بله، تمامش کن'}</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.finishConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={finishStory}><ButtonBusy busy={cloudBusy}><Check size={18} color="#FFFFFF" /></ButtonBusy><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال بستن…' : 'بله، تمامش کن'}</AppText></Pressable>
             </View>
           </View>
         </View>
@@ -2534,7 +2545,7 @@ function DongoApp() {
             <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>این عملیات برگشت‌پذیر نیست.</AppText></View>
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setDeleteStoryModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={deleteStory}><Trash2 size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>بله، حذف کن</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={deleteStory}><ButtonBusy busy={cloudBusy}><Trash2 size={18} color="#FFFFFF" /></ButtonBusy><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال حذف…' : 'بله، حذف کن'}</AppText></Pressable>
             </View>
           </View>
         </View>
@@ -2553,7 +2564,7 @@ function DongoApp() {
             <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>این عملیات برگشت‌پذیر نیست.</AppText></View>
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setDeleteExpenseTarget(null)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (deleteExpenseTarget) void deleteExpense(deleteExpenseTarget); }}><Trash2 size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال حذف…' : 'بله، حذف کن'}</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (deleteExpenseTarget) void deleteExpense(deleteExpenseTarget); }}><ButtonBusy busy={cloudBusy}><Trash2 size={18} color="#FFFFFF" /></ButtonBusy><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال حذف…' : 'بله، حذف کن'}</AppText></Pressable>
             </View>
           </View>
         </View>
@@ -2567,7 +2578,7 @@ function DongoApp() {
             <AppText style={styles.finishDialogText}>از ماجرا بیرون می‌رود و توی خرج‌های بعدی حساب نمی‌شود. اگر توی خرجی باشد، اپ اجازه نمی‌دهد حذفش کنی.</AppText>
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setDeleteMemberTarget(null)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (deleteMemberTarget) void removeGuestMember(deleteMemberTarget); }}><Trash2 size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال حذف…' : 'بله، حذف کن'}</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (deleteMemberTarget) void removeGuestMember(deleteMemberTarget); }}><ButtonBusy busy={cloudBusy}><Trash2 size={18} color="#FFFFFF" /></ButtonBusy><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال حذف…' : 'بله، حذف کن'}</AppText></Pressable>
             </View>
           </View>
         </View>
@@ -2584,7 +2595,7 @@ function DongoApp() {
             {!accountPhone && <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>همه ماجراها، خرج‌ها و تسویه‌هایت پاک می‌شوند و دیگر برنمی‌گردند.</AppText></View>}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setSignOutModal(false)}><AppText style={styles.dialogCancelText}>{accountPhone ? 'انصراف' : 'می‌مانم'}</AppText></Pressable>
-              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => void signOut()}><LogOut size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال خروج…' : 'بله، خارج شو'}</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.deleteConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => void signOut()}><ButtonBusy busy={cloudBusy}><LogOut size={18} color="#FFFFFF" /></ButtonBusy><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال خروج…' : 'بله، خارج شو'}</AppText></Pressable>
             </View>
           </View>
         </View>
@@ -2603,7 +2614,7 @@ function DongoApp() {
             <View style={styles.deleteWarning}><AppText style={styles.deleteWarningText}>بقیه هم این را می‌بینند و بعدش نمی‌شود پسش گرفت.</AppText></View>
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setPendingTransfer(null)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.finishConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (pendingTransfer) void markTransferPaid(pendingTransfer); }}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال ثبت…' : 'بله، ثبت کن'}</AppText></Pressable>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: cloudBusy }} disabled={cloudBusy} style={[styles.finishConfirmButton, cloudBusy && styles.saveButtonDisabled]} onPress={() => { if (pendingTransfer) void markTransferPaid(pendingTransfer); }}><ButtonBusy busy={cloudBusy}><Check size={18} color="#FFFFFF" /></ButtonBusy><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال ثبت…' : 'بله، ثبت کن'}</AppText></Pressable>
             </View>
           </View>
         </View>
@@ -2651,7 +2662,7 @@ function DongoApp() {
             )}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setEditMemberModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-              <Pressable accessibilityRole="button" disabled={cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)} style={[styles.dialogAdd, (cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)) && styles.saveButtonDisabled]} onPress={saveMemberEdit}><Check size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>ذخیره تغییرات</AppText></Pressable>
+              <Pressable accessibilityRole="button" disabled={cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)} style={[styles.dialogAdd, (cloudBusy || !editMemberUnits || editHouseholdNameInputs.some((name) => name.trim().length < 2) || (editingMember?.kind === 'guest' && editMemberName.trim().length < 2)) && styles.saveButtonDisabled]} onPress={saveMemberEdit}><ButtonBusy busy={cloudBusy}><Check size={18} color="#FFFFFF" /></ButtonBusy><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال ذخیره…' : 'ذخیره تغییرات'}</AppText></Pressable>
             </View>
           </View>
         </ScrollView>
@@ -2785,8 +2796,9 @@ function DongoApp() {
 
             <View style={styles.sheetFooter}>
               <View style={styles.footerPreview}><AppText style={styles.footerPreviewLabel}>{splitMode === 'equal' ? 'تقسیم بین' : 'جمع سهم‌ها'}</AppText><AppText style={styles.footerPreviewValue}>{splitMode === 'equal' ? `${faNumber.format(selectedShareUnits)} نفر` : formatMoney(enteredShareTotal)}</AppText></View>
-              <Pressable accessibilityRole="button" accessibilityState={{ disabled: !isExpenseValid }} disabled={!isExpenseValid} onPress={addExpense} style={({ pressed }) => [styles.saveButton, !isExpenseValid && styles.saveButtonDisabled, pressed && isExpenseValid && styles.pressed]}>
-                <Check size={20} color="#FFFFFF" /><AppText style={styles.saveButtonText}>{editingExpense ? 'ذخیره تغییرات' : 'ثبت خرج'}</AppText>
+              <Pressable accessibilityRole="button" accessibilityState={{ disabled: !isExpenseValid || cloudBusy }} disabled={!isExpenseValid || cloudBusy} onPress={addExpense} style={({ pressed }) => [styles.saveButton, (!isExpenseValid || cloudBusy) && styles.saveButtonDisabled, pressed && isExpenseValid && !cloudBusy && styles.pressed]}>
+                <ButtonBusy busy={cloudBusy}><Check size={20} color="#FFFFFF" /></ButtonBusy>
+                <AppText style={styles.saveButtonText}>{cloudBusy ? 'در حال ثبت…' : editingExpense ? 'ذخیره تغییرات' : 'ثبت خرج'}</AppText>
               </Pressable>
             </View>
           </View>
@@ -2818,7 +2830,7 @@ function DongoApp() {
                 )}
                 <View style={styles.dialogActions}>
                   <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setMemberModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-                  <Pressable accessibilityRole="button" accessibilityState={{ disabled: newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy }} style={[styles.dialogAdd, (newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} disabled={newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} onPress={addMember}><Plus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>اضافه کن</AppText></Pressable>
+                  <Pressable accessibilityRole="button" accessibilityState={{ disabled: newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy }} style={[styles.dialogAdd, (newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} disabled={newMemberName.trim().length < 2 || !newMemberUnits || newHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} onPress={addMember}><ButtonBusy busy={cloudBusy}><Plus size={18} color="#FFFFFF" /></ButtonBusy><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال افزودن…' : 'اضافه کن'}</AppText></Pressable>
                 </View>
               </>
             ) : (
@@ -2855,7 +2867,7 @@ function DongoApp() {
             )}
             <View style={styles.dialogActions}>
               <Pressable accessibilityRole="button" style={styles.dialogCancel} onPress={() => setJoinModal(false)}><AppText style={styles.dialogCancelText}>انصراف</AppText></Pressable>
-              <Pressable accessibilityRole="button" disabled={!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><UserPlus size={18} color="#FFFFFF" /><AppText style={styles.dialogAddText}>پیوستن</AppText></Pressable>
+              <Pressable accessibilityRole="button" disabled={!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy} style={[styles.dialogAdd, (!joinCode.trim() || joinHouseholdNameInputs.some((name) => name.trim().length < 2) || cloudBusy) && styles.saveButtonDisabled]} onPress={joinStory}><ButtonBusy busy={cloudBusy}><UserPlus size={18} color="#FFFFFF" /></ButtonBusy><AppText style={styles.dialogAddText}>{cloudBusy ? 'در حال پیوستن…' : 'پیوستن'}</AppText></Pressable>
             </View>
           </View>
         </ScrollView>
