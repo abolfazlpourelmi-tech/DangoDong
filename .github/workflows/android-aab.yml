@@ -12,6 +12,8 @@ permissions:
 env:
   BUNDLESIGNER_VERSION: 0.1.13
   BUNDLESIGNER_SHA256: 1a28844a32a16953eabe99e81400db681e844e11bb3f3bb649b8243cdd4ed3eb
+  BUNDLETOOL_VERSION: 1.18.3
+  BUNDLETOOL_SHA256: a099cfa1543f55593bc2ed16a70a7c67fe54b1747bb7301f37fdfd6d91028e29
 
 jobs:
   build-aab:
@@ -134,11 +136,49 @@ jobs:
           test "$PRODUCED" = "$BIN" || mv "$PRODUCED" "$BIN"
           echo "bin=$BIN" >> "$GITHUB_OUTPUT"
 
+      # The point of a bundle is that a phone downloads a slice of it. Report
+      # the real figure from bundletool rather than an estimate, so the number
+      # in the release notes is one that was measured.
+      - name: Measure what a phone actually downloads
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/dangodong-release.jks
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          AAB: ${{ steps.bundle.outputs.aab }}
+        run: |
+          URL="https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
+          curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" "$URL"
+          echo "$BUNDLETOOL_SHA256  $RUNNER_TEMP/bundletool.jar" | sha256sum --check --strict
+          java -jar "$RUNNER_TEMP/bundletool.jar" build-apks \
+            --bundle "$AAB" \
+            --output "$RUNNER_TEMP/dangodong.apks" \
+            --ks "$KEYSTORE_PATH" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD"
+          echo '### Download size per device' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          java -jar "$RUNNER_TEMP/bundletool.jar" get-size total \
+            --apks "$RUNNER_TEMP/dangodong.apks" \
+            --dimensions ABI | tee -a "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Collect the two files Bazaar asks for
+        id: release_files
+        env:
+          AAB: ${{ steps.bundle.outputs.aab }}
+          BIN: ${{ steps.digest.outputs.bin }}
+        run: |
+          DIR="$RUNNER_TEMP/release"
+          mkdir -p "$DIR"
+          cp "$AAB" "$BIN" "$DIR/"
+          ls -la "$DIR"
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+
       - name: Upload bundle and digest
         uses: actions/upload-artifact@v4
         with:
           name: dangodong-v${{ steps.app_version.outputs.value }}-aab
-          path: |
-            ${{ steps.bundle.outputs.aab }}
-            ${{ steps.digest.outputs.bin }}
+          path: ${{ steps.release_files.outputs.dir }}/*
           retention-days: 14
