@@ -3,6 +3,9 @@ node_modules/
 .expo/
 dist/
 dist-*/
+# expo prebuild regenerates this on every build; never commit it
+android/
+ios/
 .env
 .env.local
 .env.*.local

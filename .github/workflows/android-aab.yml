@@ -1,0 +1,144 @@
+name: Build Android App Bundle
+
+# Bazaar accepts an .aab and builds the per-device APKs itself, but it will not
+# hold a signing key. So it wants a second file alongside the bundle: a .bin
+# digest of every APK the bundle can produce, signed here where the key lives.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  BUNDLESIGNER_VERSION: 0.1.13
+  BUNDLESIGNER_SHA256: 1a28844a32a16953eabe99e81400db681e844e11bb3f3bb649b8243cdd4ed3eb
+
+jobs:
+  build-aab:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Read app version
+        id: app_version
+        shell: bash
+        run: |
+          APP_VERSION=$(node -p "require('./app.json').expo.version")
+          echo "value=$APP_VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Generate Android project
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+        run: pnpm exec expo prebuild --platform android --non-interactive
+
+      - name: Prepare signing key
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 --decode > "$RUNNER_TEMP/dangodong-release.jks"
+
+      - name: Configure release signing and bundle splits
+        run: python3 scripts/configure-release-bundle.py
+
+      - name: Build release bundle
+        working-directory: android
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: ${{ secrets.EXPO_PUBLIC_SUPABASE_URL }}
+          EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
+          DANGODONG_KEYSTORE: ${{ runner.temp }}/dangodong-release.jks
+          DANGODONG_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          DANGODONG_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          DANGODONG_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: ./gradlew bundleRelease
+
+      - name: Name the bundle after its version
+        id: bundle
+        env:
+          APP_VERSION: ${{ steps.app_version.outputs.value }}
+        run: |
+          BUILT=android/app/build/outputs/bundle/release/app-release.aab
+          AAB="android/app/build/outputs/bundle/release/dangodong-v${APP_VERSION}.aab"
+          mv "$BUILT" "$AAB"
+          echo "aab=$AAB" >> "$GITHUB_OUTPUT"
+          ls -la "$AAB"
+
+      # An update is only accepted if it carries the certificate the previous
+      # release carried. Cheaper to fail here than to find out from the store.
+      - name: Confirm the bundle carries the release certificate
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/dangodong-release.jks
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          AAB: ${{ steps.bundle.outputs.aab }}
+        run: |
+          jarsigner -verify "$AAB"
+          FROM_KEY=$(keytool -list -v -keystore "$KEYSTORE_PATH" -alias "$KEY_ALIAS" -storepass "$KEYSTORE_PASSWORD" | grep -m1 'SHA256:' | awk '{print $2}')
+          FROM_AAB=$(keytool -printcert -jarfile "$AAB" | grep -m1 'SHA256:' | awk '{print $2}')
+          echo "keystore certificate: $FROM_KEY"
+          echo "bundle certificate:   $FROM_AAB"
+          test -n "$FROM_KEY"
+          test "$FROM_KEY" = "$FROM_AAB"
+
+      - name: Fetch Bazaar's bundlesigner
+        run: |
+          URL="https://github.com/cafebazaar/bundle-signer/releases/download/v${BUNDLESIGNER_VERSION}/bundlesigner-${BUNDLESIGNER_VERSION}.jar"
+          curl -fsSL -o "$RUNNER_TEMP/bundlesigner.jar" "$URL"
+          echo "$BUNDLESIGNER_SHA256  $RUNNER_TEMP/bundlesigner.jar" | sha256sum --check --strict
+
+      - name: Sign the bundle digest for Bazaar
+        id: digest
+        env:
+          KEYSTORE_PATH: ${{ runner.temp }}/dangodong-release.jks
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          APP_VERSION: ${{ steps.app_version.outputs.value }}
+          AAB: ${{ steps.bundle.outputs.aab }}
+        run: |
+          OUT="$RUNNER_TEMP/bin"
+          mkdir -p "$OUT"
+          java -jar "$RUNNER_TEMP/bundlesigner.jar" genbin -v \
+            --bundle "$AAB" \
+            --bin "$OUT" \
+            --v2-signing-enabled true \
+            --v3-signing-enabled false \
+            --ks "$KEYSTORE_PATH" \
+            --ks-key-alias "$KEY_ALIAS" \
+            --ks-pass "pass:$KEYSTORE_PASSWORD" \
+            --key-pass "pass:$KEY_PASSWORD"
+          find "$OUT" -type f -printf '%s\t%p\n'
+          PRODUCED=$(find "$OUT" -type f -name '*.bin' | head -n 1)
+          test -n "$PRODUCED"
+          BIN="$OUT/dangodong-v${APP_VERSION}.bin"
+          test "$PRODUCED" = "$BIN" || mv "$PRODUCED" "$BIN"
+          echo "bin=$BIN" >> "$GITHUB_OUTPUT"
+
+      - name: Upload bundle and digest
+        uses: actions/upload-artifact@v4
+        with:
+          name: dangodong-v${{ steps.app_version.outputs.value }}-aab
+          path: |
+            ${{ steps.bundle.outputs.aab }}
+            ${{ steps.digest.outputs.bin }}
+          retention-days: 14
