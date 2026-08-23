@@ -164,6 +164,9 @@ jobs:
             --dimensions ABI | tee -a "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
+      # Bazaar's rule: the .bin is only valid for the exact .aab it was made
+      # from, and a rebuild is never byte-identical. So the two files must
+      # travel together, and the checksums let anyone prove they still do.
       - name: Collect the two files Bazaar asks for
         id: release_files
         env:
@@ -173,8 +176,14 @@ jobs:
           DIR="$RUNNER_TEMP/release"
           mkdir -p "$DIR"
           cp "$AAB" "$BIN" "$DIR/"
-          ls -la "$DIR"
+          (cd "$DIR" && sha256sum ./*.aab ./*.bin | tee SHA256SUMS.txt)
           echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          {
+            echo '### Upload these together'
+            echo '```'
+            cat "$DIR/SHA256SUMS.txt"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload bundle and digest
         uses: actions/upload-artifact@v4
