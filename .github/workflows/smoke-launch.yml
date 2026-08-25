@@ -1,9 +1,12 @@
-name: Diagnose launch crash
+name: Smoke test - does the app launch
 
-# Throwaway diagnostic: launches the app on an emulator with and without the
-# manifest hardening and captures logcat, so the cause of a crash is read off a
-# stack trace instead of guessed at. Builds every ABI because the release APK
-# ships arm only and the runners are x86_64.
+# Keep this. It caught 1.26.5 force-closing at launch, from a manifest change
+# that looked harmless and built clean: expo-clipboard asserts its provider is
+# exported, and providers are constructed at process start.
+#
+# Run it before tagging anything that touches the manifest or native config.
+# Builds every ABI because the release APK ships arm only and runners are
+# x86_64. Passing means the process is still alive 25s after am start.
 on:
   workflow_dispatch:
 
