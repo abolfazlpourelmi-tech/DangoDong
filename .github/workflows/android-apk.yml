@@ -55,6 +55,9 @@ jobs:
           EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
         run: pnpm exec expo prebuild --platform android --non-interactive
 
+      - name: Close the findings a store scan reports
+        run: python3 scripts/harden-release-manifest.py
+
       - name: Keep only the architectures real phones use
         # The universal APK carried four: 48 MB of native libraries, of which a
         # handset loads exactly one. x86 and x86_64 are emulator targets. Setting
