@@ -68,19 +68,16 @@ def main():
 
     manifest = manifest.replace(tag, hardened, 1)
 
-    # expo-clipboard exports a FileProvider so other apps can read an image you
-    # copied. This app only ever copies text (setStringAsync), so the provider
-    # is dead surface that a scan flags as an exported component.
-    marker = '</application>'
-    if marker not in manifest:
-        raise SystemExit('no closing application tag in %s' % MANIFEST)
-    manifest = manifest.replace(
-        marker,
-        '    <provider android:name="expo.modules.clipboard.ClipboardFileProvider"\n'
-        '      android:authorities="${applicationId}.ClipboardFileProvider"\n'
-        '      android:exported="false" tools:replace="android:exported" />\n'
-        '  ' + marker,
-        1)
+    # Not touched: expo-clipboard's exported ClipboardFileProvider. Making it
+    # android:exported="false" is what force-closed 1.26.5 — the library
+    # asserts it is exported inside attachInfo(), and providers are built at
+    # process start, so the app died before drawing anything:
+    #
+    #   java.lang.AssertionError: ClipboardFileProvider must be exported
+    #       at expo.modules.clipboard.ClipboardFileProvider.attachInfo
+    #
+    # It only ever serves an image you copied, out of the app's own cache dir.
+    # Leave it alone.
 
     write(MANIFEST, manifest)
 
@@ -89,7 +86,7 @@ def main():
         os.makedirs(directory)
     write(NETWORK_CONFIG, NETWORK_CONFIG_BODY)
 
-    print('hardened: no cleartext, no backup, clipboard provider not exported')
+    print('hardened: no cleartext traffic, no adb backup')
 
 
 if __name__ == '__main__':
