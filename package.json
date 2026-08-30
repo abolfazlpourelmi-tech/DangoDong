@@ -12,6 +12,7 @@
     "typecheck": "node --stack_size=8192 node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {
+    "@appmetrica/react-native-analytics": "^4.2.0",
     "@expo-google-fonts/estedad": "^0.4.0",
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-async-storage/async-storage": "2.2.0",

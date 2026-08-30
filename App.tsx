@@ -66,6 +66,7 @@ import {
   type SettlementPayment,
   type Transfer,
 } from './src/settlement';
+import { identifyUser, startAnalytics, track, trackFailure } from './src/analytics';
 import { AuthGate } from './src/AuthGate';
 import { friendlyError } from './src/errors';
 import { displayablePhone, toIranPhone, toLatinDigits } from './src/phone';
@@ -246,6 +247,16 @@ const STORY_TEMPLATES = [
 ] as const;
 
 const faNumber = new Intl.NumberFormat('fa-IR');
+
+/**
+ * Every failure the reader is told about is also reported. A funnel only
+ * says where people stop, never what stopped them, and the fallback string
+ * is already unique per call site, so it doubles as the label.
+ */
+function reportedError(error: unknown, fallback: string) {
+  trackFailure(fallback, error);
+  return friendlyError(error, fallback);
+}
 
 function AppText({ style, ...props }: TextProps) {
   return <Text {...props} style={[styles.defaultText, style]} />;
@@ -583,7 +594,7 @@ function DongoApp() {
         setPayments([]);
       }
     } catch (error) {
-      const message = friendlyError(error, 'همگام‌سازی ماجراها ناموفق بود');
+      const message = reportedError(error, 'همگام‌سازی ماجراها ناموفق بود');
       setStoriesError(message);
       showToast(message);
     } finally {
@@ -602,6 +613,8 @@ function DongoApp() {
       setAccountLoading(false);
       return;
     }
+    // One person on two devices should read as one person, not two.
+    identifyUser(user.id);
     const [{ data: profile, error: profileError }, { data: paymentMethod, error: paymentError }] = await Promise.all([
       supabase.from('profiles').select('full_name, phone').eq('id', user.id).maybeSingle(),
       supabase.from('payment_methods').select('card_number').eq('user_id', user.id).maybeSingle(),
@@ -653,6 +666,7 @@ function DongoApp() {
       return;
     }
     setSavedCardNumber(card);
+    track('account_saved', { card: Boolean(card) });
     showToast(card ? 'شماره کارتت ذخیره شد' : 'اطلاعات حساب ذخیره شد');
     // Member names in every story come from the profile row, so refresh them
     // instead of leaving the old name on screen until the next unrelated sync.
@@ -693,6 +707,7 @@ function DongoApp() {
       setPhoneError(phoneFailure(error.message));
       return;
     }
+    track('phone_link_started');
     setPhonePending(formatted);
     setPhoneOtp('');
     setPhoneOtpExpiresAt(Date.now() + 60_000);
@@ -734,6 +749,7 @@ function DongoApp() {
       }
     }
     setPhoneBusy(false);
+    track('phone_link_confirmed');
     setAccountPhone(phonePending);
     setPhoneStage('idle');
     setPhoneInput('');
@@ -760,6 +776,10 @@ function DongoApp() {
     setCloudBusy(false);
     setSignOutModal(false);
     if (error) showToast('خروج از حساب انجام نشد؛ دوباره تلاش کن.');
+    else {
+      track('signed_out');
+      identifyUser(null);
+    }
   }
 
   useEffect(() => {
@@ -780,6 +800,12 @@ function DongoApp() {
   }, []);
 
   useEffect(() => { void loadAccount(); }, []);
+
+  // Which screens get used, and whether people are browsing the story list or
+  // sitting inside a story.
+  useEffect(() => {
+    track('tab_opened', { tab, view: storiesHome ? 'stories' : 'story' });
+  }, [tab, storiesHome]);
 
   async function refreshMemberCards(targetStoryId = storyId) {
     if (isLocalWebPreview) {
@@ -962,13 +988,14 @@ function DongoApp() {
     setCloudBusy(true);
     try {
       await deleteOnlineExpense(expense.id);
+      track('expense_deleted', { category: expense.category ?? 'unknown' });
       await syncFromCloud(storyId);
       setDeleteExpenseTarget(null);
       setExpenseDetailsModal(false);
       showToast('خرج حذف شد و دونگ‌ها دوباره محاسبه شدند');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      showToast(friendlyError(error, 'حذف خرج ناموفق بود'));
+      showToast(reportedError(error, 'حذف خرج ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1112,11 +1139,17 @@ function DongoApp() {
       setStoryModal(false);
       setStorySwitcher(false);
       resetStoryDraft();
+      track('story_created', {
+        template: newStoryTemplate,
+        members: companions.length + 1,
+        split: splitByFamily ? 'family' : 'person',
+        partial: failed.length > 0,
+      });
       showToast(failed.length
         ? `ماجرا ساخته شد، ولی ${failed.join('، ')} اضافه نشد؛ از «افزودن نفر» دوباره امتحان کن.`
         : 'ماجرای آنلاین جدیدت آماده‌ست');
     } catch (error) {
-      showToast(friendlyError(error, 'ساخت ماجرا ناموفق بود'));
+      showToast(reportedError(error, 'ساخت ماجرا ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1152,6 +1185,7 @@ function DongoApp() {
     setCloudBusy(true);
     try {
       await completeOnlineStory(storyId);
+      track('story_finished', { members: members.length, expenses: expenses.length });
       await syncFromCloud(storyId);
       setFinishModal(false);
       setStoriesHome(true);
@@ -1159,7 +1193,7 @@ function DongoApp() {
       showToast(`ماجرای «${storyName}» با موفقیت تمام شد`);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      showToast(friendlyError(error, 'اتمام ماجرا ناموفق بود'));
+      showToast(reportedError(error, 'اتمام ماجرا ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1213,12 +1247,15 @@ function DongoApp() {
     setCloudBusy(true);
     try {
       await recordOnlinePayment(storyId, transfer);
+      // The settlement screen is the end of the funnel; this is the step that
+      // says whether people actually finish paying each other back.
+      track('transfer_marked_paid');
       await syncFromCloud(storyId);
       setPendingTransfer(null);
       showToast('پرداخت آنلاین ثبت شد و مانده‌حساب‌ها به‌روز شدند');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      showToast(friendlyError(error, 'ثبت پرداخت ناموفق بود'));
+      showToast(reportedError(error, 'ثبت پرداخت ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1293,6 +1330,9 @@ function DongoApp() {
     try {
       if (editingExpense) {
         await updateOnlineExpense(editingExpense.id, nextExpense);
+        // No titles and no amounts: how people split is the useful part, and
+        // what they spent is nobody else's business.
+        track('expense_edited', { category, split: splitMode, people: nextExpense.participantPersonCount ?? 0 });
         await syncFromCloud(storyId);
         setEditingExpense(null);
         setExpenseModal(false);
@@ -1302,6 +1342,7 @@ function DongoApp() {
         return;
       }
       await createOnlineExpense(storyId, nextExpense);
+      track('expense_added', { category, split: splitMode, people: nextExpense.participantPersonCount ?? 0 });
       await syncFromCloud(storyId);
       setExpenseModal(false);
       setTab('home');
@@ -1309,7 +1350,7 @@ function DongoApp() {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       void showExpenseInterstitial();
     } catch (error) {
-      showToast(friendlyError(error, 'ثبت خرج ناموفق بود'));
+      showToast(reportedError(error, 'ثبت خرج ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1345,6 +1386,7 @@ function DongoApp() {
     setCloudBusy(true);
     try {
       await addOnlineGuest(storyId, name, shareUnits, householdMembers);
+      track('member_added', { mode: memberMode, household: shareUnits });
       await syncFromCloud(storyId);
       setNewMemberName('');
       setNewMemberUnits('1');
@@ -1352,7 +1394,7 @@ function DongoApp() {
       setMemberModal(false);
       showToast(`${name} به‌عنوان عضو بدون اپ اضافه شد`);
     } catch (error) {
-      showToast(friendlyError(error, 'افزودن عضو ناموفق بود'));
+      showToast(reportedError(error, 'افزودن عضو ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1425,12 +1467,13 @@ function DongoApp() {
     setCloudBusy(true);
     try {
       await updateOnlineMember(editingMember.id, name, shareUnits, householdMembers);
+      track('member_edited', { kind: editingMember.kind ?? 'guest', household: shareUnits });
       await syncFromCloud(storyId);
       setEditMemberModal(false);
       setEditingMember(null);
       showToast('اطلاعات عضو ویرایش شد');
     } catch (error) {
-      showToast(friendlyError(error, 'ویرایش عضو ناموفق بود'));
+      showToast(reportedError(error, 'ویرایش عضو ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1448,13 +1491,14 @@ function DongoApp() {
     setCloudBusy(true);
     try {
       await deleteOnlineGuest(member.id);
+      track('member_removed');
       await syncFromCloud(storyId);
       setDeleteMemberTarget(null);
       setEditMemberModal(false);
       showToast(`${member.name} از این ماجرا حذف شد`);
     } catch (error) {
       setDeleteMemberTarget(null);
-      showToast(friendlyError(error, 'حذف این نفر ناموفق بود'));
+      showToast(reportedError(error, 'حذف این نفر ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1479,6 +1523,7 @@ function DongoApp() {
     setCloudBusy(true);
     try {
       await deleteOnlineStory(storyId);
+      track('story_deleted', { members: members.length, expenses: expenses.length });
       activeStoryIdRef.current = '';
       setStoryId('');
       setStoryName('');
@@ -1491,7 +1536,7 @@ function DongoApp() {
       setTab('home');
       showToast(`ماجرای «${deletedName}» حذف شد`);
     } catch (error) {
-      showToast(friendlyError(error, 'حذف ماجرا ناموفق بود'));
+      showToast(reportedError(error, 'حذف ماجرا ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1513,6 +1558,7 @@ function DongoApp() {
     setCloudBusy(true);
     try {
       const joinedStoryId = await joinOnlineStory(code, shareUnits, [accountName.trim() || 'من', ...additionalNames]);
+      track('story_joined', { household: shareUnits });
       await syncFromCloud(joinedStoryId, true);
       setJoinCode('');
       setJoinUnits('1');
@@ -1521,7 +1567,7 @@ function DongoApp() {
       setJoinModal(false);
       showToast('با موفقیت به ماجرا پیوستی');
     } catch (error) {
-      showToast(friendlyError(error, 'کد دعوت معتبر نیست'));
+      showToast(reportedError(error, 'کد دعوت معتبر نیست'));
     } finally {
       setCloudBusy(false);
     }
@@ -1529,6 +1575,7 @@ function DongoApp() {
 
   async function copyCardNumber(card: string, ownerName: string) {
     await Clipboard.setStringAsync(card);
+    track('card_copied');
     showToast(`شماره کارت ${ownerName} کپی شد`);
     void Haptics.selectionAsync();
   }
@@ -1536,11 +1583,13 @@ function DongoApp() {
   async function copyInviteCode() {
     if (!activeStory?.inviteCode) return;
     await Clipboard.setStringAsync(activeStory.inviteCode);
+    track('invite_copied');
     showToast('کد دعوت کپی شد');
   }
 
   async function shareInviteCode() {
     if (!activeStory?.inviteCode) return;
+    track('invite_shared');
     await Share.share({ message: `برای پیوستن به ماجرای «${activeStory.name}» در دنگودونگ، این کد را وارد کن: ${activeStory.inviteCode}` });
   }
 
@@ -3506,6 +3555,11 @@ const styles = StyleSheet.create({
 });
 
 export default function App() {
+  // Started at the root rather than inside DongoApp: AuthGate renders the
+  // sign-in screens, and a session that only begins after sign-in cannot
+  // show how many people never get that far.
+  useEffect(() => { startAnalytics(); }, []);
+
   return (
     <SafeAreaProvider>
       <AuthGate>
