@@ -28,6 +28,14 @@ NETWORK_CONFIG_BODY = """<?xml version="1.0" encoding="utf-8"?>
 """
 
 
+# Matched by android:name, which is the key the merger identifies a provider
+# by; the authority it declares does not need repeating here.
+PRELOAD_INFO_PROVIDER = (
+    '\n        <provider'
+    ' android:name="io.appmetrica.analytics.internal.PreloadInfoContentProvider"'
+    ' tools:node="remove" />')
+
+
 def read(path):
     return io.open(path, encoding='utf-8').read()
 
@@ -66,6 +74,17 @@ def main():
         ' tools:replace="android:usesCleartextTraffic,android:networkSecurityConfig">',
         1)
 
+    # AppMetrica's AAR brings a content provider for attributing copies of the
+    # app that shipped preinstalled on a phone. Nothing here is preinstalled
+    # anywhere, nothing reads it, and it arrives android:exported="true" — the
+    # kind of finding a store scan opens with. Dropping it is an instruction to
+    # the manifest merger, not a change to a component the app runs: the class
+    # is never constructed, so nothing can assert it is exported the way
+    # expo-clipboard's provider does below.
+    if PRELOAD_INFO_PROVIDER.strip() in manifest:
+        raise SystemExit('%s already drops the preload-info provider' % MANIFEST)
+    hardened += PRELOAD_INFO_PROVIDER
+
     manifest = manifest.replace(tag, hardened, 1)
 
     # Not touched: expo-clipboard's exported ClipboardFileProvider. Making it
@@ -86,7 +105,7 @@ def main():
         os.makedirs(directory)
     write(NETWORK_CONFIG, NETWORK_CONFIG_BODY)
 
-    print('hardened: no cleartext traffic, no adb backup')
+    print('hardened: no cleartext traffic, no adb backup, no preload-info provider')
 
 
 if __name__ == '__main__':
