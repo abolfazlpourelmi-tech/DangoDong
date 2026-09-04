@@ -16,3 +16,6 @@ npm-debug.log*
 *.key
 *.mobileprovision
 ._*
+# raw AppMetrica exports: device ids and cities, never in the repo
+analytics-data/
+.appmetrica-token
