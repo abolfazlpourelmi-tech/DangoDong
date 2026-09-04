@@ -74,9 +74,9 @@ import { supabase } from './src/supabase';
 import {
   type AdDiagnostics,
   type NativeAdContent,
-  clearHomeNativeAd,
+  clearNativeAd,
   getAdDiagnostics,
-  loadHomeNativeAd,
+  loadNativeAd,
   preloadExpenseInterstitial,
   reportNativeAdClick,
   retryAds,
@@ -374,10 +374,27 @@ function CategoryBadge({ category, size = 48 }: { category?: ExpenseCategory; si
   );
 }
 
+/**
+ * Fires once when a sheet closes without having committed anything.
+ *
+ * Every existing event records a success, which is why the database could say
+ * 17 outings never got an expense but nothing could say how many people opened
+ * the expense sheet, looked at it, and backed out. That difference is the
+ * whole question.
+ */
+function useAbandonTracker(sheet: string, open: boolean, committed: { current: Record<string, boolean> }) {
+  const wasOpen = useRef(false);
+  useEffect(() => {
+    if (wasOpen.current && !open && !committed.current[sheet]) track('sheet_abandoned', { sheet });
+    wasOpen.current = open;
+  }, [open, sheet, committed]);
+}
+
 function DongoApp() {
   const insets = useSafeAreaInsets();
   const { keyboardVisible, keyboardInset, windowHeight } = useKeyboardInset();
-  const [homeAd, setHomeAd] = useState<NativeAdContent | null>(null);
+  // One creative for the session, rendered on whichever screen is in front.
+  const [screenAd, setScreenAd] = useState<NativeAdContent | null>(null);
 
   // Edge-to-edge means the system navigation bar sits on top of the app, so the
   // bottom inset has to be reserved by hand or content hides underneath it.
@@ -468,7 +485,16 @@ function DongoApp() {
   const [editMemberUnits, setEditMemberUnits] = useState('1');
   const [editHouseholdNameInputs, setEditHouseholdNameInputs] = useState<string[]>([]);
   const activeStoryIdRef = useRef('');
+  // Mirrors expenseModal for the realtime sync callback, which is registered
+  // once and therefore only ever sees the first render's state.
+  const expenseModalRef = useRef(false);
+  // Set when a sheet's action succeeds, so closing it afterwards is not
+  // counted as walking away.
+  const sheetCommitted = useRef<Record<string, boolean>>({});
   const [toast, setToast] = useState('');
+  // A failure needs longer on screen than a confirmation, and it should not be
+  // announced with the same green tick that means "done".
+  const [toastTone, setToastTone] = useState<'ok' | 'error'>('ok');
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [pendingTransfer, setPendingTransfer] = useState<Transfer | null>(null);
   const [accountName, setAccountName] = useState('');
@@ -491,7 +517,14 @@ function DongoApp() {
   const [accountLoading, setAccountLoading] = useState(true);
   const [accountSaving, setAccountSaving] = useState(false);
   const [accountError, setAccountError] = useState('');
+  // An empty form after a failed read is indistinguishable from an account with
+  // nothing in it, and saving that form deletes the card number that is really
+  // still on the server. So a failed read gets its own screen.
+  const [accountLoadFailed, setAccountLoadFailed] = useState(false);
   const [memberCards, setMemberCards] = useState<Record<string, string>>({});
+  // Absent cards and unread cards look identical in the map, and telling
+  // somebody "he has not registered a card" sends them chasing the wrong person.
+  const [memberCardsFailed, setMemberCardsFailed] = useState(false);
   // Hidden behind a long-press on the account header. Google's Android
   // downloads are blocked from Iran, so adb logcat is not reachable for the
   // people who need to know why an ad slot is empty.
@@ -523,7 +556,22 @@ function DongoApp() {
   const hasValidShares = splitMode === 'equal'
     ? selectedPersonIds.length > 0
     : enteredShareTotal === numericAmount && enteredShareTotal > 0;
-  const isExpenseValid = numericAmount > 0 && Boolean(title.trim()) && Boolean(payerId) && hasValidShares;
+  // The field is labelled "دلخواه" and the sheet opens with a category name
+  // already in it, so clearing it must not silently grey out the save button.
+  const isExpenseValid = numericAmount > 0 && Boolean(payerId) && hasValidShares;
+  /**
+   * A greyed-out button with no explanation is where people give up. Whatever
+   * is still missing is said in one line above it.
+   */
+  const expenseBlockReason = numericAmount <= 0
+    ? 'اول مبلغ این خرج را وارد کن.'
+    : !payerId
+      ? 'مشخص کن چه کسی پرداخت کرده.'
+      : splitMode === 'equal'
+        ? (selectedPersonIds.length === 0 ? 'دست‌کم یک نفر را انتخاب کن؛ خرج باید بین کسی تقسیم شود.' : '')
+        : enteredShareTotal !== numericAmount
+          ? `جمع سهم‌ها الان ${formatMoney(enteredShareTotal)} است و باید دقیقاً ${formatMoney(numericAmount)} شود.`
+          : '';
   const memberById = (id: string) => members.find((member) => member.id === id);
   const activeStory = stories.find((story) => story.id === storyId);
   const storyCompleted = activeStory?.status === 'completed';
@@ -562,11 +610,23 @@ function DongoApp() {
     setExpenses(story.expenses);
     setPayments(story.payments ?? []);
     const me = story.members.find((member) => member.isMe) ?? story.members[0];
-    setPayerId(me?.id ?? '');
     const people = story.members.flatMap((member) => Array.from(
       { length: Math.max(1, member.shareUnits ?? 1) },
       (_, index) => `${member.id}::${index}`,
     ));
+    // Every realtime change in the story runs this, and around a restaurant
+    // table somebody else is adding an expense while you are still filling
+    // yours in. Rebuilding the draft from scratch there re-ticked everyone you
+    // had just unticked and moved the payer back to you — someone else's tap
+    // silently rewriting the form under your fingers. Read from a ref because
+    // the subscription callback closes over the first render.
+    if (expenseModalRef.current) {
+      const stillThere = new Set(people);
+      setSelectedPersonIds((current) => current.filter((id) => stillThere.has(id)));
+      setPayerId((current) => (story.members.some((member) => member.id === current) ? current : me?.id ?? ''));
+      return;
+    }
+    setPayerId(me?.id ?? '');
     setSelectedPersonIds(people);
   }
 
@@ -596,7 +656,7 @@ function DongoApp() {
     } catch (error) {
       const message = reportedError(error, 'همگام‌سازی ماجراها ناموفق بود');
       setStoriesError(message);
-      showToast(message);
+      showError(message);
     } finally {
       setStoriesLoading(false);
     }
@@ -606,10 +666,11 @@ function DongoApp() {
     if (!supabase) return;
     setAccountLoading(true);
     setAccountError('');
+    setAccountLoadFailed(false);
     const { data: userData, error: userError } = await supabase.auth.getUser();
     const user = userData.user;
     if (userError || !user) {
-      setAccountError('دریافت اطلاعات حساب ناموفق بود.');
+      setAccountLoadFailed(true);
       setAccountLoading(false);
       return;
     }
@@ -620,7 +681,7 @@ function DongoApp() {
       supabase.from('payment_methods').select('card_number').eq('user_id', user.id).maybeSingle(),
     ]);
     if (profileError || paymentError) {
-      setAccountError('دریافت اطلاعات حساب ناموفق بود.');
+      setAccountLoadFailed(true);
     } else {
       setAccountName(profile?.full_name ?? '');
       setAccountPhone(displayablePhone(profile?.phone ?? user.phone ?? ''));
@@ -632,6 +693,11 @@ function DongoApp() {
 
   async function saveAccount() {
     if (!supabase || accountSaving) return;
+    // Saving what was never read would write blanks over real values.
+    if (accountLoadFailed) {
+      setAccountError('اول باید اطلاعات حسابت خوانده شود؛ «تلاش دوباره» را بزن.');
+      return;
+    }
     const name = accountName.trim();
     const card = normalizeDigits(accountCardNumber);
     if (name.length < 2) {
@@ -787,6 +853,44 @@ function DongoApp() {
   }, [storyId]);
 
   useEffect(() => {
+    expenseModalRef.current = expenseModal;
+  }, [expenseModal]);
+
+  useAbandonTracker('expense', expenseModal, sheetCommitted);
+  useAbandonTracker('story', storyModal, sheetCommitted);
+  useAbandonTracker('member', memberModal, sheetCommitted);
+  useAbandonTracker('join', joinModal, sheetCommitted);
+
+  /**
+   * A reason shown for a moment is somebody typing; a reason still on screen
+   * four seconds later is somebody stuck. Only the second is worth reporting.
+   */
+  useEffect(() => {
+    if (!expenseModal || isExpenseValid || !expenseBlockReason) return;
+    const timer = setTimeout(() => track('flow_blocked', { where: 'expense', reason: expenseBlockReason }), 4000);
+    return () => clearTimeout(timer);
+  }, [expenseModal, isExpenseValid, expenseBlockReason]);
+
+  /**
+   * The screen where 31 of 57 outings stopped. This says what it was actually
+   * able to offer: how many payments were outstanding, and for how many of
+   * them the app could not name a destination — which is every guest, because
+   * guests cannot hold a card number at all. If `missing_cards` tracks
+   * abandonment, the card is the problem; if people leave with every card in
+   * place, recording a payment simply is not worth doing and the fix is
+   * elsewhere.
+   */
+  useEffect(() => {
+    if (tab !== 'settlement' || storiesHome || !storyId) return;
+    track('settlement_viewed', {
+      transfers: transfers.length,
+      missing_cards: transfers.filter((transfer) => !memberCards[transfer.toId]).length,
+      guest_targets: transfers.filter((transfer) => memberById(transfer.toId)?.kind === 'guest').length,
+      my_card: Boolean(savedCardNumber.trim()),
+    });
+  }, [tab, storiesHome, storyId, transfers.length, memberCards, savedCardNumber]);
+
+  useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
     void syncFromCloud();
     const unsubscribe = subscribeToStoryChanges(() => {
@@ -815,9 +919,11 @@ function DongoApp() {
     if (!targetStoryId) return;
     try {
       setMemberCards(await loadStoryMemberCards(targetStoryId));
+      setMemberCardsFailed(false);
     } catch {
       // Card numbers are a convenience; settling still works without them.
       setMemberCards({});
+      setMemberCardsFailed(true);
     }
   }
 
@@ -851,10 +957,10 @@ function DongoApp() {
 
   // Subscribing is platform-agnostic; only the fetching is Android-only.
   useEffect(() => {
-    setNativeAdListener(setHomeAd);
+    setNativeAdListener(setScreenAd);
     return () => {
       setNativeAdListener(null);
-      clearHomeNativeAd();
+      clearNativeAd();
     };
   }, []);
 
@@ -863,30 +969,40 @@ function DongoApp() {
     void preloadExpenseInterstitial();
   }, []);
 
-  // The ad card belongs under the balance card on a story's home screen.
+  // Requested once rather than per screen. Only one screen is ever visible, so
+  // re-requesting on every tab change would buy no extra impressions — Tapsell
+  // counts the impression when the creative is shown — and would only add
+  // traffic and a flicker each time the reader moves.
   useEffect(() => {
-    if (Platform.OS !== 'android') return;
-    if (tab === 'home' && !storiesHome) void loadHomeNativeAd();
-    else clearHomeNativeAd();
-  }, [tab, storiesHome]);
+    // The web module is a no-op off localhost, so this needs no platform gate:
+    // on a phone it reaches Tapsell, in the preview it draws the stand-in.
+    void loadNativeAd();
+  }, []);
 
+  /**
+   * Ordered topmost-first, because these modals stack. The explainer and the
+   * confirmation dialogs are opened *on top of* the sheet or dialog that
+   * launched them, so checking the launcher first closed the wrong one: back
+   * from "وقتی خانواده را ثبت می‌کنی چه می‌شود؟" used to dismiss the join
+   * dialog underneath and leave the explainer stranded over an empty screen.
+   */
   function goBackInApp() {
+    if (familyInfoModal) { setFamilyInfoModal(false); return true; }
+    if (deleteMemberTarget) { setDeleteMemberTarget(null); return true; }
+    if (deleteExpenseTarget) { setDeleteExpenseTarget(null); return true; }
+    if (deleteStoryModal) { setDeleteStoryModal(false); return true; }
+    if (pendingTransfer) { setPendingTransfer(null); return true; }
+    if (signOutModal) { setSignOutModal(false); return true; }
+    if (finishModal) { setFinishModal(false); return true; }
+    if (editMemberModal) { setEditMemberModal(false); return true; }
+    if (memberModal) { setMemberModal(false); return true; }
+    if (expenseModal) { setExpenseModal(false); setEditingExpense(null); return true; }
+    if (expenseDetailsModal) { setExpenseDetailsModal(false); return true; }
+    if (notificationsModal) { setNotificationsModal(false); return true; }
+    if (joinModal) { setJoinModal(false); return true; }
     if (storyModal && storyStep === 2) { setStoryStep(1); return true; }
     if (storyModal) { setStoryModal(false); return true; }
-    if (joinModal) { setJoinModal(false); return true; }
     if (storySwitcher) { setStorySwitcher(false); return true; }
-    if (finishModal) { setFinishModal(false); return true; }
-    if (notificationsModal) { setNotificationsModal(false); return true; }
-    if (expenseDetailsModal) { setExpenseDetailsModal(false); return true; }
-    if (expenseModal) { setExpenseModal(false); setEditingExpense(null); return true; }
-    if (memberModal) { setMemberModal(false); return true; }
-    if (editMemberModal) { setEditMemberModal(false); return true; }
-    if (deleteStoryModal) { setDeleteStoryModal(false); return true; }
-    if (signOutModal) { setSignOutModal(false); return true; }
-    if (deleteMemberTarget) { setDeleteMemberTarget(null); return true; }
-    if (familyInfoModal) { setFamilyInfoModal(false); return true; }
-    if (deleteExpenseTarget) { setDeleteExpenseTarget(null); return true; }
-    if (pendingTransfer) { setPendingTransfer(null); return true; }
     if (tab !== 'home') { setTab('home'); return true; }
     if (!storiesHome) { setStoriesHome(true); return true; }
     return false;
@@ -995,13 +1111,19 @@ function DongoApp() {
       showToast('خرج حذف شد و دونگ‌ها دوباره محاسبه شدند');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      showToast(reportedError(error, 'حذف خرج ناموفق بود'));
+      showError(reportedError(error, 'حذف خرج ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
   }
 
   function openExpenseModal() {
+    // Both of these used to be a `disabled` prop, which meant the button was
+    // simply inert: no explanation, and nothing to press twice before giving up.
+    if (storiesHome || !storyId) {
+      showToast('اول یکی از ماجراها را باز کن تا بتوانی خرج ثبت کنی.');
+      return;
+    }
     if (storyCompleted) {
       showToast('این ماجرا تمام شده؛ فقط می‌توانی مرورش کنی.');
       return;
@@ -1019,6 +1141,8 @@ function DongoApp() {
     setSplitOptionsOpen(false);
     setShareInputs({});
     setItemLabels({});
+    sheetCommitted.current.expense = false;
+    track('sheet_opened', { sheet: 'expense', members: members.length });
     setExpenseModal(true);
   }
 
@@ -1139,6 +1263,7 @@ function DongoApp() {
       setStoryModal(false);
       setStorySwitcher(false);
       resetStoryDraft();
+      sheetCommitted.current.story = true;
       track('story_created', {
         template: newStoryTemplate,
         members: companions.length + 1,
@@ -1149,7 +1274,7 @@ function DongoApp() {
         ? `ماجرا ساخته شد، ولی ${failed.join('، ')} اضافه نشد؛ از «افزودن نفر» دوباره امتحان کن.`
         : 'ماجرای آنلاین جدیدت آماده‌ست');
     } catch (error) {
-      showToast(reportedError(error, 'ساخت ماجرا ناموفق بود'));
+      showError(reportedError(error, 'ساخت ماجرا ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1159,6 +1284,8 @@ function DongoApp() {
     resetStoryDraft();
     setNewStoryTemplate('restaurant');
     setStorySwitcher(false);
+    sheetCommitted.current.story = false;
+    track('sheet_opened', { sheet: 'story', stories: stories.length });
     setStoryModal(true);
   }
 
@@ -1193,7 +1320,7 @@ function DongoApp() {
       showToast(`ماجرای «${storyName}» با موفقیت تمام شد`);
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      showToast(reportedError(error, 'اتمام ماجرا ناموفق بود'));
+      showError(reportedError(error, 'اتمام ماجرا ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1207,6 +1334,19 @@ function DongoApp() {
     void Haptics.selectionAsync();
   }
 
+  /**
+   * "مبلغ هر نفر جدا" and "سفارش هر نفر" both start from nothing, so the first
+   * thing the reader meets is a column of empty boxes and a total that refuses
+   * to match. Starting from an even split and correcting two rows is the same
+   * answer with far less typing.
+   */
+  function fillSharesEqually() {
+    if (numericAmount <= 0 || !expensePeople.length) return;
+    const shares = allocateByWeight(numericAmount, expensePeople.map((person) => ({ memberId: person.id, weight: 1 })));
+    setShareInputs(Object.fromEntries(shares.map((share) => [share.memberId, String(share.amount)])));
+    void Haptics.selectionAsync();
+  }
+
   function toggleExpensePerson(id: string) {
     setSelectedPersonIds((current) => (
       current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
@@ -1214,15 +1354,40 @@ function DongoApp() {
     void Haptics.selectionAsync();
   }
 
-  function showToast(message: string) {
+  function showToast(message: string, tone: 'ok' | 'error' = 'ok') {
     // Without clearing the previous timer, a second toast inherits the first
     // one's countdown and can vanish almost immediately.
     if (toastTimer.current) clearTimeout(toastTimer.current);
     setToast(message);
+    setToastTone(tone);
     toastTimer.current = setTimeout(() => {
       toastTimer.current = null;
       setToast('');
-    }, 2800);
+    }, tone === 'error' ? 5200 : 2800);
+  }
+
+  /** Something went wrong and the reader has to read it, not glimpse it. */
+  function showError(message: string) {
+    showToast(message, 'error');
+  }
+
+  /**
+   * The toast is the only place several failures are ever reported, so it has
+   * to exist on every screen that can produce one — including the first-run
+   * screen, where a mistyped invite code or a failed story creation used to
+   * leave nothing behind but a button that stopped spinning.
+   */
+  function renderToast() {
+    if (!toast) return null;
+    const isError = toastTone === 'error';
+    return (
+      <View style={styles.toast} accessibilityLiveRegion="polite">
+        <View style={[styles.toastCheck, isError && styles.toastCheckError]}>
+          {isError ? <AlertTriangle size={15} color="#FFFFFF" /> : <Check size={15} color="#FFFFFF" />}
+        </View>
+        <AppText style={styles.toastText}>{toast}</AppText>
+      </View>
+    );
   }
 
   function openNotification(item: AccountNotification) {
@@ -1255,7 +1420,7 @@ function DongoApp() {
       showToast('پرداخت آنلاین ثبت شد و مانده‌حساب‌ها به‌روز شدند');
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     } catch (error) {
-      showToast(reportedError(error, 'ثبت پرداخت ناموفق بود'));
+      showError(reportedError(error, 'ثبت پرداخت ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1303,7 +1468,7 @@ function DongoApp() {
         });
     const nextExpense: Expense = {
       id: '',
-      title: title.trim(),
+      title: title.trim() || categoryInfo(category).label,
       amount: Math.round(numericAmount),
       payerId,
       allocations,
@@ -1332,6 +1497,7 @@ function DongoApp() {
         await updateOnlineExpense(editingExpense.id, nextExpense);
         // No titles and no amounts: how people split is the useful part, and
         // what they spent is nobody else's business.
+        sheetCommitted.current.expense = true;
         track('expense_edited', { category, split: splitMode, people: nextExpense.participantPersonCount ?? 0 });
         await syncFromCloud(storyId);
         setEditingExpense(null);
@@ -1342,6 +1508,7 @@ function DongoApp() {
         return;
       }
       await createOnlineExpense(storyId, nextExpense);
+      sheetCommitted.current.expense = true;
       track('expense_added', { category, split: splitMode, people: nextExpense.participantPersonCount ?? 0 });
       await syncFromCloud(storyId);
       setExpenseModal(false);
@@ -1350,7 +1517,7 @@ function DongoApp() {
       void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       void showExpenseInterstitial();
     } catch (error) {
-      showToast(reportedError(error, 'ثبت خرج ناموفق بود'));
+      showError(reportedError(error, 'ثبت خرج ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1386,6 +1553,7 @@ function DongoApp() {
     setCloudBusy(true);
     try {
       await addOnlineGuest(storyId, name, shareUnits, householdMembers);
+      sheetCommitted.current.member = true;
       track('member_added', { mode: memberMode, household: shareUnits });
       await syncFromCloud(storyId);
       setNewMemberName('');
@@ -1394,7 +1562,7 @@ function DongoApp() {
       setMemberModal(false);
       showToast(`${name} به‌عنوان عضو بدون اپ اضافه شد`);
     } catch (error) {
-      showToast(reportedError(error, 'افزودن عضو ناموفق بود'));
+      showError(reportedError(error, 'افزودن عضو ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1416,6 +1584,8 @@ function DongoApp() {
     setNewHouseholdNameInputs([]);
     setNewMemberFamilyOpen(false);
     setMemberMode(canManageGuests ? 'guest' : 'invite');
+    sheetCommitted.current.member = false;
+    track('sheet_opened', { sheet: 'member' });
     setMemberModal(true);
   }
 
@@ -1473,7 +1643,7 @@ function DongoApp() {
       setEditingMember(null);
       showToast('اطلاعات عضو ویرایش شد');
     } catch (error) {
-      showToast(reportedError(error, 'ویرایش عضو ناموفق بود'));
+      showError(reportedError(error, 'ویرایش عضو ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1498,7 +1668,7 @@ function DongoApp() {
       showToast(`${member.name} از این ماجرا حذف شد`);
     } catch (error) {
       setDeleteMemberTarget(null);
-      showToast(reportedError(error, 'حذف این نفر ناموفق بود'));
+      showError(reportedError(error, 'حذف این نفر ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1536,7 +1706,7 @@ function DongoApp() {
       setTab('home');
       showToast(`ماجرای «${deletedName}» حذف شد`);
     } catch (error) {
-      showToast(reportedError(error, 'حذف ماجرا ناموفق بود'));
+      showError(reportedError(error, 'حذف ماجرا ناموفق بود'));
     } finally {
       setCloudBusy(false);
     }
@@ -1547,6 +1717,8 @@ function DongoApp() {
     setJoinUnits('1');
     setJoinHouseholdNameInputs([]);
     setJoinFamilyOpen(false);
+    sheetCommitted.current.join = false;
+    track('sheet_opened', { sheet: 'join' });
     setJoinModal(true);
   }
 
@@ -1558,6 +1730,7 @@ function DongoApp() {
     setCloudBusy(true);
     try {
       const joinedStoryId = await joinOnlineStory(code, shareUnits, [accountName.trim() || 'من', ...additionalNames]);
+      sheetCommitted.current.join = true;
       track('story_joined', { household: shareUnits });
       await syncFromCloud(joinedStoryId, true);
       setJoinCode('');
@@ -1567,7 +1740,7 @@ function DongoApp() {
       setJoinModal(false);
       showToast('با موفقیت به ماجرا پیوستی');
     } catch (error) {
-      showToast(reportedError(error, 'کد دعوت معتبر نیست'));
+      showError(reportedError(error, 'کد دعوت معتبر نیست'));
     } finally {
       setCloudBusy(false);
     }
@@ -1583,12 +1756,14 @@ function DongoApp() {
   async function copyInviteCode() {
     if (!activeStory?.inviteCode) return;
     await Clipboard.setStringAsync(activeStory.inviteCode);
+    sheetCommitted.current.member = true;
     track('invite_copied');
     showToast('کد دعوت کپی شد');
   }
 
   async function shareInviteCode() {
     if (!activeStory?.inviteCode) return;
+    sheetCommitted.current.member = true;
     track('invite_shared');
     await Share.share({ message: `برای پیوستن به ماجرای «${activeStory.name}» در دنگودونگ، این کد را وارد کن: ${activeStory.inviteCode}` });
   }
@@ -1706,6 +1881,15 @@ function DongoApp() {
     }
 
     const namedCompanions = newCompanions.filter((item) => item.name.trim());
+    // Checked before the button rather than after the press: a one-letter name
+    // used to be a toast that appeared where the finished story should have
+    // been, with no sign of which row it meant.
+    const familySubNames = splitByFamily
+      ? [...ownerSubNames, ...newCompanions.flatMap((item) => item.subs)]
+      : [];
+    const hasTooShortName = [...newCompanions.map((item) => item.name), ...familySubNames]
+      .map((name) => name.trim())
+      .some((name) => name.length === 1);
     const headcount = splitByFamily
       ? 1 + ownerSubNames.filter((item) => item.trim()).length
         + namedCompanions.reduce((sum, item) => sum + 1 + item.subs.filter((sub) => sub.trim()).length, 0)
@@ -1842,12 +2026,14 @@ function DongoApp() {
           <AppText style={styles.addCompanionText}>{splitByFamily ? 'افزودن خانواده' : 'افزودن نفر'}</AppText>
         </Pressable>
 
+        {hasTooShortName && <AppText accessibilityLiveRegion="polite" style={styles.storyStepError}>هر اسم باید دست‌کم دو حرف باشد. ردیف‌های خالی نادیده گرفته می‌شوند.</AppText>}
+
         <View style={styles.storyStepActions}>
           <Pressable accessibilityRole="button" onPress={() => setStoryStep(1)} style={styles.storyBackButton}>
             <ArrowRight size={18} color={C.purple} />
             <AppText style={styles.storyBackText}>مرحله قبل</AppText>
           </Pressable>
-          <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => void createStory()} style={[styles.createStoryButtonGrow, cloudBusy && styles.saveButtonDisabled]}>
+          <Pressable accessibilityRole="button" disabled={cloudBusy || hasTooShortName} onPress={() => void createStory()} style={[styles.createStoryButtonGrow, (cloudBusy || hasTooShortName) && styles.saveButtonDisabled]}>
             <ButtonBusy busy={cloudBusy}><Check size={20} color="#FFFFFF" /></ButtonBusy>
             <AppText style={styles.saveButtonText}>{cloudBusy ? 'در حال ساختن…' : headcount === 1
               ? 'فعلاً فقط خودم'
@@ -1875,6 +2061,8 @@ function DongoApp() {
           <Pressable accessibilityRole="button" onPress={openNewStory} style={styles.dashboardNewStory}><Plus size={19} color="#FFFFFF" /><AppText style={styles.dashboardNewStoryText}>ساخت ماجرای جدید</AppText></Pressable>
           <Pressable accessibilityRole="button" onPress={openJoinModal} style={styles.dashboardJoinStory}><UserPlus size={18} color={C.purple} /><AppText style={styles.dashboardJoinStoryText}>پیوستن با کد</AppText></Pressable>
         </View>
+
+        {renderAdCard()}
 
         <View style={styles.dashboardSectionHead}><View style={styles.ongoingCount}><AppText style={styles.ongoingCountText}>{faNumber.format(ongoing.length)}</AppText></View><AppText style={styles.sectionTitle}>ماجراهای در جریان</AppText></View>
         <View style={styles.dashboardStoryList}>{ongoing.length ? ongoing.map(renderStoryCard) : <View style={styles.inlineEmpty}><AppText style={styles.inlineEmptyTitle}>ماجرای در جریانی نداری</AppText><AppText style={styles.inlineEmptyText}>یک ماجرای تازه بساز و خرج‌ها را ثبت کن.</AppText></View>}</View>
@@ -1931,7 +2119,16 @@ function DongoApp() {
             <AppText style={styles.adPanelHint}>این پنل فقط برای عیب‌یابی است. اگر خطایی اینجا بود، همان متن را برای پشتیبانی بفرست.</AppText>
           </View>
         )}
-        {accountLoading ? <View style={styles.accountCard}><AppText style={styles.accountHint}>اطلاعات حساب در حال بارگذاری است…</AppText></View> : <View style={styles.accountCard}>
+        {accountLoading ? <View style={styles.accountCard}><AppText style={styles.accountHint}>اطلاعات حساب در حال بارگذاری است…</AppText></View> : accountLoadFailed ? (
+          <View style={styles.accountCard}>
+            <View style={styles.deleteDialogIcon}><AlertTriangle size={25} color={C.debt} /></View>
+            <AppText style={styles.accountSectionTitle}>اطلاعات حسابت خوانده نشد</AppText>
+            <AppText style={styles.accountHint}>تا وقتی خوانده نشود اینجا را نشانت نمی‌دهیم، چون فرم خالی با حساب خالی اشتباه می‌شود و ذخیره‌اش شماره کارت ثبت‌شده‌ات را پاک می‌کند.</AppText>
+            <Pressable accessibilityRole="button" onPress={() => void loadAccount()} style={({ pressed }) => [styles.accountSaveButton, pressed && styles.pressed]}>
+              <AppText style={styles.accountSaveText}>تلاش دوباره</AppText>
+            </Pressable>
+          </View>
+        ) : <View style={styles.accountCard}>
           <AppText style={styles.accountSectionTitle}>اطلاعات من</AppText>
           <AppText style={styles.accountLabel}>اسم تو <AppText style={styles.requiredMark}>*</AppText></AppText>
           <TextInput accessibilityLabel="اسم تو" value={accountName} onChangeText={setAccountName} placeholder="مثلاً امیر" placeholderTextColor={C.faint} style={styles.accountInput} textAlign="right" />
@@ -2008,11 +2205,44 @@ function DongoApp() {
           {accountError ? <AppText style={styles.accountError}>{accountError}</AppText> : null}
           <Pressable accessibilityRole="button" disabled={accountSaving} onPress={() => void saveAccount()} style={({ pressed }) => [styles.accountSaveButton, pressed && styles.pressed, accountSaving && styles.saveButtonDisabled]}><ButtonBusy busy={accountSaving}><Check size={17} color="#FFFFFF" /></ButtonBusy><AppText style={styles.accountSaveText}>{accountSaving ? 'در حال ذخیره…' : 'ذخیره تغییرات'}</AppText></Pressable>
         </View>}
+        {renderAdCard()}
         <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => setSignOutModal(true)} style={({ pressed }) => [styles.accountLogoutButton, pressed && styles.pressed, cloudBusy && { opacity: 0.65 }]}><LogOut size={18} color={C.debt} /><AppText style={styles.accountLogoutText}>خروج از حساب</AppText></Pressable>
         {/* The ad diagnostics panel is support tooling, not a feature. It stays
             reachable by long-pressing the header above, so nobody has to read
             "وضعیت فنی تبلیغ‌ها" and wonder whether it is something they broke. */}
       </View>
+    );
+  }
+
+  /**
+   * Always labelled «تبلیغ», always inside the page's own scroll, never pinned
+   * over anything. Rendered by the app rather than placed by the SDK, which is
+   * the only way an ad can appear on every screen here without landing on top
+   * of the navigation.
+   */
+  function renderAdCard() {
+    if (!screenAd) return null;
+    return (
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`تبلیغ: ${screenAd.title ?? ''}`}
+        onPress={() => reportNativeAdClick(screenAd.responseId)}
+        style={({ pressed }) => [styles.adCard, pressed && styles.pressed]}
+      >
+        {screenAd.iconUrl || screenAd.imageUrl
+          ? <Image source={{ uri: screenAd.iconUrl ?? screenAd.imageUrl }} style={styles.adCardImage} resizeMode="cover" />
+          : null}
+        <View style={styles.adCardCopy}>
+          <View style={styles.adCardTitleRow}>
+            <View style={styles.adCardTag}><AppText style={styles.adCardTagText}>تبلیغ</AppText></View>
+            <AppText numberOfLines={1} style={styles.adCardTitle}>{screenAd.title ?? 'پیشنهاد ویژه'}</AppText>
+          </View>
+          {screenAd.description ? <AppText numberOfLines={2} style={styles.adCardText}>{screenAd.description}</AppText> : null}
+        </View>
+        {screenAd.callToAction
+          ? <View style={styles.adCardCta}><AppText style={styles.adCardCtaText}>{screenAd.callToAction}</AppText></View>
+          : <ChevronLeft size={18} color={C.purple} />}
+      </Pressable>
     );
   }
 
@@ -2038,28 +2268,7 @@ function DongoApp() {
           <Image source={require('./assets/dong-mascot-optimized.png')} style={styles.heroMascot} resizeMode="contain" />
         </LinearGradient>
 
-        {homeAd && (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`تبلیغ: ${homeAd.title ?? ''}`}
-            onPress={() => reportNativeAdClick(homeAd.responseId)}
-            style={({ pressed }) => [styles.adCard, pressed && styles.pressed]}
-          >
-            {homeAd.iconUrl || homeAd.imageUrl
-              ? <Image source={{ uri: homeAd.iconUrl ?? homeAd.imageUrl }} style={styles.adCardImage} resizeMode="cover" />
-              : null}
-            <View style={styles.adCardCopy}>
-              <View style={styles.adCardTitleRow}>
-                <View style={styles.adCardTag}><AppText style={styles.adCardTagText}>تبلیغ</AppText></View>
-                <AppText numberOfLines={1} style={styles.adCardTitle}>{homeAd.title ?? 'پیشنهاد ویژه'}</AppText>
-              </View>
-              {homeAd.description ? <AppText numberOfLines={2} style={styles.adCardText}>{homeAd.description}</AppText> : null}
-            </View>
-            {homeAd.callToAction
-              ? <View style={styles.adCardCta}><AppText style={styles.adCardCtaText}>{homeAd.callToAction}</AppText></View>
-              : <ChevronLeft size={18} color={C.purple} />}
-          </Pressable>
-        )}
+        {renderAdCard()}
 
         <View style={styles.statsRow}>
           <View style={[styles.statCard, { backgroundColor: C.yellowPale }]}>
@@ -2171,9 +2380,13 @@ function DongoApp() {
               : `${faNumber.format(filteredExpenses.length)} از ${faNumber.format(expenses.length)} خرج · ${formatMoney(filteredTotal)}`}</AppText>
           </View>
         </View>
+        {renderAdCard()}
         {/* Filters over a list you can take in at a glance are three controls
             that do nothing yet, and they arrive before the list itself. */}
-        {expenses.length > 4 && (
+        {/* The chips are hidden on short lists, so they must also appear
+            whenever one of them is still on — otherwise deleting expenses down
+            past the threshold leaves an empty screen and no way to clear it. */}
+        {(expenses.length > 4 || expenseFilter !== 'all') && (
           <View style={styles.filterRow}>
             {([
               { id: 'all', label: 'همه' },
@@ -2199,7 +2412,11 @@ function DongoApp() {
   function renderSettlement() {
     // Nobody can transfer money to someone whose card they cannot see, so ask
     // for it right where the need shows up rather than hiding it in settings.
-    const needsOwnCard = !accountLoading && !savedCardNumber.trim() && Boolean(currentUserId);
+    // …and only when somebody is actually about to pay this reader. Otherwise
+    // a form for a question nobody asked pushed the settlement plan — the whole
+    // point of the screen — below the fold.
+    const someoneOwesMe = transfers.some((transfer) => transfer.toId === currentMember?.id);
+    const needsOwnCard = !accountLoading && !accountLoadFailed && !savedCardNumber.trim() && Boolean(currentUserId) && someoneOwesMe;
     const typedCardDigits = normalizeDigits(accountCardNumber).length;
     // Saving a partial number just bounces off the 16-digit rule, so keep the
     // button off until it can actually succeed.
@@ -2262,6 +2479,8 @@ function DongoApp() {
               : 'حساب همه با هم صاف است. تا خرج تازه‌ای ثبت نشود، اینجا کاری نداری.'}</AppText>
           </View>
         </View>
+
+        {renderAdCard()}
 
         <View style={styles.balanceSummary}>
           {balances.map((balance) => {
@@ -2327,11 +2546,13 @@ function DongoApp() {
                   </Pressable>
                 ) : (
                   <View style={styles.transferCardMissing}>
-                    <AppText style={styles.transferCardMissingText}>{to?.isMe
-                      ? 'هنوز شماره کارتت را نداده‌ای. از بالای همین صفحه واردش کن تا بقیه بتوانند دونگت را بریزند.'
-                      : to?.kind === 'guest'
-                        ? `${to?.name} در اپ نیست؛ شماره کارتش را باید خودت بپرسی.`
-                        : `${to?.name} هنوز شماره کارتی ثبت نکرده.`}</AppText>
+                    <AppText style={styles.transferCardMissingText}>{memberCardsFailed && to?.kind !== 'guest'
+                      ? 'شماره کارت‌ها این بار خوانده نشد. صفحه تسویه را دوباره باز کن.'
+                      : to?.isMe
+                        ? 'هنوز شماره کارتت را نداده‌ای. از بالای همین صفحه واردش کن تا بقیه بتوانند دونگت را بریزند.'
+                        : to?.kind === 'guest'
+                          ? `${to?.name} در اپ نیست؛ شماره کارتش را باید خودت بپرسی.`
+                          : `${to?.name} هنوز شماره کارتی ثبت نکرده.`}</AppText>
                   </View>
                 )}
                 <View style={styles.transferFooter}>
@@ -2357,11 +2578,29 @@ function DongoApp() {
     return (
       <View style={[styles.safeArea, { paddingTop: insets.top }]}>
         <StatusBar style="dark" />
+        {/* "حساب من" lives on the bottom nav, and the bottom nav only exists
+            once there is a story. Somebody who has just installed the app was
+            therefore unable to reach the one screen that tells them their data
+            disappears without a phone number — the very first thing they should
+            be able to fix. */}
         <View style={styles.welcomeBrand}>
-          <View style={styles.brandCopy}><AppText style={styles.brandName}>دنگودونگ</AppText><AppText style={styles.brandTagline}>خرج کن، راحت تسویه کن</AppText></View>
-          <View style={styles.brandMark}><WalletCards size={23} color="#FFFFFF" /></View>
+          {tab === 'account' ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="بازگشت" onPress={() => setTab('home')} style={styles.iconButton}><ArrowRight size={21} color={C.ink} /></Pressable>
+          ) : <View style={styles.iconButtonPlaceholder} />}
+          <View style={styles.welcomeBrandCopy}>
+            <View style={styles.brandCopy}><AppText style={styles.brandName}>دنگودونگ</AppText><AppText style={styles.brandTagline}>خرج کن، راحت تسویه کن</AppText></View>
+            <View style={styles.brandMark}><WalletCards size={23} color="#FFFFFF" /></View>
+          </View>
+          {tab === 'account' ? <View style={styles.iconButtonPlaceholder} /> : (
+            <Pressable accessibilityRole="button" accessibilityLabel="حساب من" onPress={() => { setTab('account'); void loadAccount(); }} style={styles.iconButton}><UserRound size={21} color={C.ink} /></Pressable>
+          )}
         </View>
-        {storiesLoading ? <View style={styles.storiesLoading}><AppText style={styles.welcomeTitle}>ماجراها در حال بارگذاری‌اند…</AppText><AppText style={styles.welcomeText}>چند لحظه صبر کن تا اطلاعات حسابت دریافت شود.</AppText></View> : storiesError ? <View style={styles.storiesLoading}><View style={styles.deleteDialogIcon}><AlertTriangle size={27} color={C.debt} /></View><AppText style={styles.welcomeTitle}>اطلاعاتت دریافت نشد</AppText><AppText style={styles.welcomeText}>{storiesError}</AppText><Pressable accessibilityRole="button" style={styles.primaryStoryButton} onPress={() => void syncFromCloud()}><AppText style={styles.primaryStoryButtonText}>تلاش دوباره</AppText></Pressable></View> : <ScrollView contentContainerStyle={styles.welcomeContent} showsVerticalScrollIndicator={false}>
+        {tab === 'account' ? (
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+            {renderAccount()}
+            <View style={{ height: (keyboardVisible ? keyboardInset : insets.bottom) + 40 }} />
+          </ScrollView>
+        ) : storiesLoading ? <View style={styles.storiesLoading}><AppText style={styles.welcomeTitle}>ماجراها در حال بارگذاری‌اند…</AppText><AppText style={styles.welcomeText}>چند لحظه صبر کن تا اطلاعات حسابت دریافت شود.</AppText></View> : storiesError ? <View style={styles.storiesLoading}><View style={styles.deleteDialogIcon}><AlertTriangle size={27} color={C.debt} /></View><AppText style={styles.welcomeTitle}>اطلاعاتت دریافت نشد</AppText><AppText style={styles.welcomeText}>{storiesError}</AppText><Pressable accessibilityRole="button" style={styles.primaryStoryButton} onPress={() => void syncFromCloud()}><AppText style={styles.primaryStoryButtonText}>تلاش دوباره</AppText></Pressable></View> : <ScrollView contentContainerStyle={styles.welcomeContent} showsVerticalScrollIndicator={false}>
           <View style={styles.welcomeVisual}>
             <View style={styles.welcomeGlow} />
             <Image source={require('./assets/dong-mascot-optimized.png')} style={styles.welcomeMascot} resizeMode="contain" />
@@ -2435,6 +2674,7 @@ function DongoApp() {
           </ScrollView>
           )}
         </Modal>
+        {renderToast()}
       </View>
     );
   }
@@ -2482,12 +2722,7 @@ function DongoApp() {
         <View style={{ height: (keyboardVisible ? keyboardInset : insets.bottom) + 118 }} />
       </ScrollView>
 
-      {toast ? (
-        <View style={styles.toast} accessibilityLiveRegion="polite">
-          <View style={styles.toastCheck}><Check size={15} color="#FFFFFF" /></View>
-          <AppText style={styles.toastText}>{toast}</AppText>
-        </View>
-      ) : null}
+      {renderToast()}
 
       {/* The nav floats above the content, so with the keyboard up it would
           otherwise hover over the keyboard and cover the field being typed in. */}
@@ -2500,7 +2735,7 @@ function DongoApp() {
           <View style={[styles.navIconWrap, tab === 'expenses' && styles.navIconWrapActive]}><ReceiptText size={21} color={tab === 'expenses' ? C.purple : C.faint} /></View>
           <AppText style={[styles.navLabel, tab === 'expenses' && styles.navLabelActive]}>خرج‌ها</AppText>
         </Pressable>
-        <Pressable accessibilityRole="button" accessibilityLabel="ثبت خرج جدید" accessibilityState={{ disabled: storiesHome || storyCompleted }} disabled={storiesHome || storyCompleted} onPress={openExpenseModal} style={({ pressed }) => [styles.addNavItem, (storiesHome || storyCompleted) && styles.addNavDisabled, pressed && styles.addNavPressed]}>
+        <Pressable accessibilityRole="button" accessibilityLabel="ثبت خرج جدید" onPress={openExpenseModal} style={({ pressed }) => [styles.addNavItem, (storiesHome || storyCompleted) && styles.addNavDisabled, pressed && styles.addNavPressed]}>
           <View style={styles.addNavCircle}><Plus size={25} color="#FFFFFF" strokeWidth={2.8} /></View>
           <AppText style={styles.addNavLabel}>خرج جدید</AppText>
         </Pressable>
@@ -2909,6 +3144,12 @@ function DongoApp() {
                       </View>
                     </View>)}
                   </View>)}
+                  {numericAmount > 0 && enteredShareTotal !== numericAmount && (
+                    <Pressable accessibilityRole="button" onPress={fillSharesEqually} style={styles.selectAllButton}>
+                      <Check size={14} color={C.purple} />
+                      <AppText style={styles.selectAllText}>پر کردن مساوی بین {faNumber.format(expensePeople.length)} نفر</AppText>
+                    </Pressable>
+                  )}
                   <View style={[styles.shareTotal, enteredShareTotal === numericAmount && numericAmount > 0 ? styles.shareTotalValid : styles.shareTotalInvalid]}><AppText style={styles.shareTotalLabel}>جمع سهم‌ها</AppText><AppText style={styles.shareTotalValue}>{formatMoney(enteredShareTotal)} از {formatMoney(numericAmount)}</AppText></View>
                 </View>
               )}
@@ -2931,11 +3172,16 @@ function DongoApp() {
             </ScrollView>
 
             <View style={styles.sheetFooter}>
+              {!isExpenseValid && expenseBlockReason ? (
+                <AppText accessibilityLiveRegion="polite" style={styles.footerReason}>{expenseBlockReason}</AppText>
+              ) : null}
+              <View style={styles.sheetFooterRow}>
               <View style={styles.footerPreview}><AppText style={styles.footerPreviewLabel}>{splitMode === 'equal' ? 'تقسیم بین' : 'جمع سهم‌ها'}</AppText><AppText style={styles.footerPreviewValue}>{splitMode === 'equal' ? `${faNumber.format(selectedShareUnits)} نفر` : formatMoney(enteredShareTotal)}</AppText></View>
               <Pressable accessibilityRole="button" accessibilityState={{ disabled: !isExpenseValid || cloudBusy }} disabled={!isExpenseValid || cloudBusy} onPress={addExpense} style={({ pressed }) => [styles.saveButton, (!isExpenseValid || cloudBusy) && styles.saveButtonDisabled, pressed && isExpenseValid && !cloudBusy && styles.pressed]}>
                 <ButtonBusy busy={cloudBusy}><Check size={20} color="#FFFFFF" /></ButtonBusy>
                 <AppText style={styles.saveButtonText}>{cloudBusy ? 'در حال ثبت…' : editingExpense ? 'ذخیره تغییرات' : 'ثبت خرج'}</AppText>
               </Pressable>
+              </View>
             </View>
           </View>
         </View>
@@ -3154,6 +3400,7 @@ const styles = StyleSheet.create({
   addNavLabel: { fontFamily: F.bold, color: C.coralInk, fontSize: 9, marginTop: 1 },
   toast: { position: 'absolute', bottom: 98, left: 22, right: 22, minHeight: 51, borderRadius: 18, backgroundColor: C.ink, paddingHorizontal: 14, flexDirection: 'row-reverse', alignItems: 'center', gap: 9, shadowColor: C.ink, shadowOpacity: 0.2, shadowRadius: 12, elevation: 8 },
   toastCheck: { width: 27, height: 27, borderRadius: 10, backgroundColor: C.mint, alignItems: 'center', justifyContent: 'center' },
+  toastCheckError: { backgroundColor: C.debt },
   toastText: { flex: 1, fontFamily: F.semi, color: '#FFFFFF', fontSize: 11, textAlign: 'right' },
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(28,22,48,0.45)', justifyContent: 'flex-end' },
   // Height is supplied at render time from the keyboard inset.
@@ -3201,7 +3448,10 @@ const styles = StyleSheet.create({
   participantNameActive: { fontFamily: F.bold, color: C.ink },
   participantCheck: { width: 20, height: 20, borderRadius: 8, backgroundColor: '#EEE9E3', alignItems: 'center', justifyContent: 'center' },
   participantCheckActive: { backgroundColor: C.purple },
-  sheetFooter: { minHeight: 82, backgroundColor: C.paper, borderTopWidth: 1, borderTopColor: C.line, paddingHorizontal: 18, paddingVertical: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  sheetFooter: { backgroundColor: C.paper, borderTopWidth: 1, borderTopColor: C.line, paddingHorizontal: 18, paddingVertical: 12 },
+  sheetFooterRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  footerReason: { fontFamily: F.semi, fontSize: 10, lineHeight: 18, color: C.coralInk, textAlign: 'right', marginBottom: 8 },
+  storyStepError: { fontFamily: F.semi, fontSize: 11, lineHeight: 20, color: C.debtInk, textAlign: 'right', marginTop: 12 },
   footerPreview: { alignItems: 'flex-end', minWidth: 54 },
   footerPreviewLabel: { fontFamily: F.medium, color: C.muted, fontSize: 8 },
   footerPreviewValue: { fontFamily: F.bold, fontSize: 11, marginTop: 2 },
@@ -3243,7 +3493,8 @@ const styles = StyleSheet.create({
   familyInfoText: { flex: 1, fontFamily: F.medium, fontSize: 11, color: C.ink, lineHeight: 20, textAlign: 'right' },
   familyInfoButton: { alignSelf: 'stretch' },
   familyInfoExample: { fontFamily: F.medium, fontSize: 10, color: C.muted, lineHeight: 19, textAlign: 'right', backgroundColor: C.canvas, borderRadius: 12, padding: 11, marginTop: 12 },
-  welcomeBrand: { height: 72, paddingHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
+  welcomeBrand: { height: 72, paddingHorizontal: 18, flexDirection: 'row-reverse', alignItems: 'center', justifyContent: 'space-between' },
+  welcomeBrandCopy: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   welcomeContent: { paddingHorizontal: 22, paddingBottom: 34, alignItems: 'center' },
   storiesLoading: { flex: 1, paddingHorizontal: 28, alignItems: 'center', justifyContent: 'center' },
   welcomeVisual: { width: '100%', height: 260, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },

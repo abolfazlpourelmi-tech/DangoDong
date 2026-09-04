@@ -12,10 +12,11 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { track } from './analytics';
 import { toIranPhone, toLatinDigits } from './phone';
 import { isSupabaseConfigured, supabase } from './supabase';
 
-type Stage = 'welcome' | 'phone' | 'otp' | 'profile' | 'ready';
+type Stage = 'welcome' | 'phone' | 'otp' | 'profile' | 'unreachable' | 'ready';
 
 const OTP_EXPIRY_SECONDS = 60;
 const isLocalWebPreview = Platform.OS === 'web'
@@ -39,6 +40,10 @@ function friendlyError(message: string) {
 }
 
 export function AuthGate({ children }: { children: ReactNode }) {
+  // Until now this whole component was silent: the SDK was activated before it
+  // rendered, so installs and sessions were counted, but nothing said whether
+  // somebody got past the first screen. Anyone who stopped here left no trace.
+  const reportStage = (stage: Stage, outcome: string) => track('onboarding_stage', { stage, outcome });
   // Matches App.tsx: the edge-to-edge window never resizes for the keyboard, so
   // the inset has to be applied by hand instead of via KeyboardAvoidingView.
   const insets = useSafeAreaInsets();
@@ -69,9 +74,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
       .eq('id', nextSession.user.id)
       .maybeSingle();
 
+    reportStage('welcome', profile ? 'returning' : profileError ? 'unreadable' : 'new');
     if (profileError) {
+      // A profile that could not be *read* used to land on "اسمت چیه؟", so a
+      // dropped connection at launch asked a returning user to introduce
+      // themselves again — and saving that form overwrote the name they
+      // already had. A failed read gets a retry, not a form.
       setError(friendlyError(profileError.message));
-      setStage('profile');
+      setStage('unreachable');
     } else if (profile) {
       setStage('ready');
     } else {
@@ -130,6 +140,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       setError(friendlyError(authError.message));
       return;
     }
+    reportStage('phone', 'code_sent');
     setSubmittedPhone(formatted);
     setSecondsRemaining(OTP_EXPIRY_SECONDS);
     setOtpExpiresAt(Date.now() + OTP_EXPIRY_SECONDS * 1000);
@@ -143,9 +154,14 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const { data, error: authError } = await supabase.auth.signInAnonymously();
     setSubmitting(false);
     if (authError) {
+      // The failure the app's own error copy anticipates: anonymous sign-in
+      // switched off server-side stops every new user dead, and nothing has
+      // ever reported it.
+      reportStage('welcome', 'anonymous_failed');
       setError(friendlyError(authError.message));
       return;
     }
+    reportStage('welcome', 'anonymous_ok');
     await resolveAccount(data.session);
   }
 
@@ -165,10 +181,35 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const { data, error: authError } = await supabase.auth.verifyOtp({ phone: submittedPhone, token, type: 'sms' });
     setSubmitting(false);
     if (authError) {
+      reportStage('otp', 'rejected');
       setError(friendlyError(authError.message));
+      // Otherwise the next attempt starts by deleting six wrong digits by hand.
+      setOtp('');
       return;
     }
+    reportStage('otp', 'verified');
     await resolveAccount(data.session);
+  }
+
+  /** Retry needs to look like it is doing something, or it gets pressed again. */
+  async function retryAccountRead() {
+    setSubmitting(true);
+    setError('');
+    await resolveAccount(session);
+    setSubmitting(false);
+  }
+
+  /** The way out of a stage that will not complete, so nobody is ever stuck. */
+  async function abandonSession() {
+    if (!supabase) return;
+    setSubmitting(true);
+    await supabase.auth.signOut();
+    setSubmitting(false);
+    setError('');
+    setOtp('');
+    setFullName('');
+    reportStage('profile', 'abandoned');
+    setStage('welcome');
   }
 
   async function saveProfile() {
@@ -196,6 +237,7 @@ export function AuthGate({ children }: { children: ReactNode }) {
       return;
     }
     setSubmitting(false);
+    reportStage('profile', 'saved');
     setStage('ready');
   }
 
@@ -215,12 +257,13 @@ export function AuthGate({ children }: { children: ReactNode }) {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.brand}><Text style={styles.brandLetter}>د</Text></View>
-        <Text style={styles.title}>{stage === 'profile' ? 'اسمت چیه؟' : stage === 'welcome' ? 'دنگودونگ' : 'ورود با شماره موبایل'}</Text>
+        <Text style={styles.title}>{stage === 'profile' ? 'اسمت چیه؟' : stage === 'unreachable' ? 'حسابت خوانده نشد' : stage === 'welcome' ? 'دنگودونگ' : 'ورود با شماره موبایل'}</Text>
         <Text style={styles.subtitle}>
           {stage === 'welcome' && 'خرج‌های دوستانه را اینجا ثبت کن تا آخرش معلوم شود هر کس چقدر به چه کسی بدهکار است.'}
           {stage === 'phone' && 'شماره موبایلت را وارد کن تا کد ورود برایت پیامک شود.'}
           {stage === 'otp' && 'کد شش‌رقمی که پیامک شد را وارد کن.'}
           {stage === 'profile' && 'همین اسم را بقیه در ماجراهای مشترک می‌بینند.'}
+          {stage === 'unreachable' && 'اطلاعات حسابت این بار دریافت نشد. حسابت سر جایش است؛ فقط باید دوباره امتحان کنیم.'}
         </Text>
 
         {stage === 'welcome' && (
@@ -275,6 +318,12 @@ export function AuthGate({ children }: { children: ReactNode }) {
                 ? `اعتبار کد: ${String(Math.floor(secondsRemaining / 60)).padStart(2, '0')}:${String(secondsRemaining % 60).padStart(2, '0')}`
                 : 'اعتبار کد تمام شده؛ دوباره کد بگیر.'}
             </Text>
+            {/* "دوباره کد بگیر" with nothing to press was a dead end at the
+                very first step: the only way onwards was to guess that going
+                back to the phone screen and re-submitting would do it. */}
+            {secondsRemaining === 0 && (
+              <Pressable accessibilityRole="button" disabled={submitting} onPress={() => { setOtp(''); void requestOtp(); }}><Text style={styles.link}>ارسال دوباره کد</Text></Pressable>
+            )}
             <Pressable onPress={() => { setStage('phone'); setOtp(''); setOtpExpiresAt(null); setSecondsRemaining(0); setError(''); }}><Text style={styles.link}>اصلاح شماره موبایل</Text></Pressable>
           </>
         )}
@@ -288,12 +337,20 @@ export function AuthGate({ children }: { children: ReactNode }) {
         {error ? <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text> : null}
         {stage !== 'welcome' && <Pressable
           accessibilityRole="button"
-          disabled={submitting}
-          onPress={stage === 'phone' ? requestOtp : stage === 'otp' ? verifyOtp : saveProfile}
-          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, submitting && styles.buttonDisabled]}
+          disabled={submitting || (stage === 'otp' && toLatinDigits(otp).length !== 6)}
+          onPress={stage === 'phone' ? requestOtp : stage === 'otp' ? verifyOtp : stage === 'unreachable' ? () => void retryAccountRead() : saveProfile}
+          style={({ pressed }) => [styles.button, pressed && styles.buttonPressed, (submitting || (stage === 'otp' && toLatinDigits(otp).length !== 6)) && styles.buttonDisabled]}
         >
-          {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>{stage === 'phone' ? 'برایم کد بفرست' : stage === 'otp' ? 'تأیید و ورود' : 'شروع'}</Text>}
+          {submitting ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.buttonText}>{stage === 'phone' ? 'برایم کد بفرست' : stage === 'otp' ? 'تأیید و ورود' : stage === 'unreachable' ? 'تلاش دوباره' : 'شروع'}</Text>}
         </Pressable>}
+        {/* Both of these stages sit behind the app with no other control on
+            them. Without a way out, a profile save or a profile read that keeps
+            failing is the end of the session — reinstalling is not a fix. */}
+        {(stage === 'profile' || stage === 'unreachable') && (
+          <Pressable accessibilityRole="button" disabled={submitting} onPress={() => void abandonSession()}>
+            <Text style={styles.escapeLink}>خروج و شروع دوباره</Text>
+          </Pressable>
+        )}
       </ScrollView>
     </View>
   );
@@ -323,4 +380,5 @@ const styles = StyleSheet.create({
   buttonDisabled: { opacity: 0.65 },
   buttonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', writingDirection: 'rtl' },
   link: { color: '#6652D9', fontSize: 14, fontWeight: '700', marginBottom: 14, writingDirection: 'rtl' },
+  escapeLink: { color: '#777184', fontSize: 13, fontWeight: '700', marginTop: 16, writingDirection: 'rtl' },
 });

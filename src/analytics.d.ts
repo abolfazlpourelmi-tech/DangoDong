@@ -29,7 +29,17 @@ export type AnalyticsEvent =
   | 'phone_link_confirmed'
   | 'account_saved'
   | 'signed_out'
-  | 'action_failed';
+  | 'action_failed'
+  // Added after the first look at real data. 57 outings existed; 17 never got
+  // an expense and 31 got expenses but never a settlement. The events above
+  // only record successes, so they say where people stopped and nothing about
+  // why. These four are the "why": what they opened and left, what blocked
+  // them, and what the settlement screen could actually offer them.
+  | 'onboarding_stage'
+  | 'sheet_opened'
+  | 'sheet_abandoned'
+  | 'flow_blocked'
+  | 'settlement_viewed';
 
 export type AnalyticsParams = Record<string, string | number | boolean>;
 

@@ -3,8 +3,11 @@ import AppMetrica from '@appmetrica/react-native-analytics';
 /**
  * The SDK key of the «DangoDong» app at appmetrica.yandex.com (Application ID
  * 6349213), from Settings → General settings → «API key (for SDK)». Not the
- * «Post API key» below it — that one reads the collected data back out and has
- * no business being inside a shipped APK.
+ * «Post API key» below it: that one is a *write* credential for pushing events
+ * into AppMetrica server-to-server, and it has no business being in a shipped
+ * APK either. Neither of them reads data back out — that is a Yandex OAuth
+ * token with the appmetrica:read scope, and scripts/journeys.py explains how
+ * to get one.
  *
  * Like the Tapsell keys this is a client-side identifier that ships readable
  * in the bundle, so there is nothing secret about it being here.
