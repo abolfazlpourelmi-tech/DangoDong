@@ -15,8 +15,8 @@ export type AdDiagnostics = {
 
 export function preloadExpenseInterstitial(): Promise<void>;
 export function showExpenseInterstitial(): Promise<boolean>;
-export function loadHomeNativeAd(): Promise<void>;
-export function clearHomeNativeAd(): void;
+export function loadNativeAd(): Promise<void>;
+export function clearNativeAd(): void;
 export function setNativeAdListener(listener: ((ad: NativeAdContent | null) => void) | null): void;
 export function reportNativeAdClick(responseId: string): void;
 export function getAdDiagnostics(): AdDiagnostics;

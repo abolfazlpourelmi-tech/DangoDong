@@ -14,12 +14,17 @@ import TapsellPlus from 'react-native-tapsell-plus';
  */
 const APP_KEY = 'dqihompffbhoojnktithkstseikdnislmqntlhibcqflgggoijpkanodelbjnfejtbfhqi';
 const EXPENSE_INTERSTITIAL_ZONE_ID = '6a7e3fb7c946be46b1574ee5';
-// A native ("بنر همسان") zone, not a standard banner. A standard banner is a
-// native view the SDK pins to a screen edge by gravity, so it could never sit
-// under the balance card — and under edge-to-edge its bottom edge lands behind
-// the system navigation bar. A native zone hands back the raw creative instead,
-// which the app renders as its own card exactly where it belongs.
-const HOME_NATIVE_ZONE_ID = '6a83374bb471e817c86ad892';
+// A native ("بنر همسان") zone, not a standard banner, and the reason is worth
+// keeping: a standard banner is a view the SDK pins to a screen edge by
+// gravity. In this app that edge is already taken — the floating bottom nav
+// sits there, and under edge-to-edge the banner's own bottom lands behind the
+// system navigation bar. A banner on every screen would therefore cover the
+// navigation on every screen. A native zone hands back the raw creative
+// instead, which the app renders as its own card wherever it belongs.
+//
+// One zone serves every screen. Only one screen is visible at a time, so a
+// separate zone per screen would only split the reporting.
+const NATIVE_ZONE_ID = '6a83374bb471e817c86ad892';
 
 /**
  * The SDK needs a moment to reach Tapsell's servers, so a request fired in the
@@ -179,16 +184,16 @@ function scheduleNativeRetry() {
   if (nativeTimer) clearTimeout(nativeTimer);
   nativeTimer = setTimeout(() => {
     nativeTimer = null;
-    if (nativeWanted) void loadHomeNativeAd();
+    if (nativeWanted) void loadNativeAd();
   }, delay);
 }
 
-export function loadHomeNativeAd(): Promise<void> {
+export function loadNativeAd(): Promise<void> {
   ensureInitialised();
   nativeWanted = true;
   if (nativeAd || nativeRequest) return nativeRequest ?? Promise.resolve();
 
-  nativeRequest = Promise.resolve(TapsellPlus.requestNativeAd(HOME_NATIVE_ZONE_ID))
+  nativeRequest = Promise.resolve(TapsellPlus.requestNativeAd(NATIVE_ZONE_ID))
     .then((responseId) => {
       if (!nativeWanted) return; // Screen was left while the request was in flight.
       TapsellPlus.showNativeAd(
@@ -227,7 +232,7 @@ export function loadHomeNativeAd(): Promise<void> {
 }
 
 /** Stops retrying and drops the creative when the host screen goes away. */
-export function clearHomeNativeAd() {
+export function clearNativeAd() {
   nativeWanted = false;
   nativeAttempt = 0;
   if (nativeTimer) {
@@ -276,5 +281,5 @@ export function retryAds() {
   if (interstitialTimer) { clearTimeout(interstitialTimer); interstitialTimer = null; }
   if (nativeTimer) { clearTimeout(nativeTimer); nativeTimer = null; }
   void preloadExpenseInterstitial();
-  if (nativeWanted) void loadHomeNativeAd();
+  if (nativeWanted) void loadNativeAd();
 }
