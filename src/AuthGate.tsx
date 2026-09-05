@@ -1,5 +1,5 @@
 import type { Session } from '@supabase/supabase-js';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Keyboard,
@@ -25,6 +25,13 @@ const isLocalWebPreview = Platform.OS === 'web'
 
 function friendlyError(message: string) {
   const lower = message.toLowerCase();
+  // Without this the sign-in screen answered a dropped connection in English,
+  // straight from the network layer. It is the first screen anyone sees.
+  if (lower.includes('network') || lower.includes('failed to fetch')
+      || lower.includes('timeout') || lower.includes('offline')
+      || lower.includes('connection')) {
+    return 'به اینترنت وصل نیستی. اتصالت را چک کن و دوباره امتحان کن.';
+  }
   if (lower.includes('anonymous') && lower.includes('disabled')) {
     return 'شروع بدون شماره هنوز در سرور فعال نشده است. چند لحظه دیگر دوباره امتحان کن.';
   }
@@ -43,7 +50,17 @@ export function AuthGate({ children }: { children: ReactNode }) {
   // Until now this whole component was silent: the SDK was activated before it
   // rendered, so installs and sessions were counted, but nothing said whether
   // somebody got past the first screen. Anyone who stopped here left no trace.
-  const reportStage = (stage: Stage, outcome: string) => track('onboarding_stage', { stage, outcome });
+  // resolveAccount runs from getSession(), from onAuthStateChange, and again
+  // after every sign-in, so the same stage was reported three times on a single
+  // launch — enough to make any funnel built on these events wrong. Consecutive
+  // identical reports are dropped.
+  const lastStage = useRef('');
+  const reportStage = (stage: Stage, outcome: string, reason?: string) => {
+    const key = `${stage}:${outcome}:${reason ?? ''}`;
+    if (lastStage.current === key) return;
+    lastStage.current = key;
+    track('onboarding_stage', reason ? { stage, outcome, reason } : { stage, outcome });
+  };
   // Matches App.tsx: the edge-to-edge window never resizes for the keyboard, so
   // the inset has to be applied by hand instead of via KeyboardAvoidingView.
   const insets = useSafeAreaInsets();
@@ -154,10 +171,10 @@ export function AuthGate({ children }: { children: ReactNode }) {
     const { data, error: authError } = await supabase.auth.signInAnonymously();
     setSubmitting(false);
     if (authError) {
-      // The failure the app's own error copy anticipates: anonymous sign-in
-      // switched off server-side stops every new user dead, and nothing has
-      // ever reported it.
-      reportStage('welcome', 'anonymous_failed');
+      // Seen five times in a row on a real device before it finally succeeded,
+      // which is four times more than anyone would keep pressing. Without the
+      // reason there is no way to tell a server switch from a rate limit.
+      reportStage('welcome', 'anonymous_failed', authError.message.slice(0, 120));
       setError(friendlyError(authError.message));
       return;
     }

@@ -9,6 +9,7 @@ import * as Haptics from 'expo-haptics';
 import * as Clipboard from 'expo-clipboard';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
+import appConfig from './app.json';
 import ArrowLeftIcon from 'lucide-react-native/icons/arrow-left';
 import ArrowRightIcon from 'lucide-react-native/icons/arrow-right';
 import BedDoubleIcon from 'lucide-react-native/icons/bed-double';
@@ -247,6 +248,14 @@ const STORY_TEMPLATES = [
 ] as const;
 
 const faNumber = new Intl.NumberFormat('fa-IR');
+
+/** Read from app.json so it can never drift from what was actually built. */
+const APP_VERSION = appConfig.expo.version;
+
+/** Persian digits for a string that is not a number, like "1.27.0". */
+function faDigits(value: string) {
+  return value.replace(/[0-9]/g, (digit) => '۰۱۲۳۴۵۶۷۸۹'[Number(digit)]);
+}
 
 /**
  * Every failure the reader is told about is also reported. A funnel only
@@ -525,6 +534,10 @@ function DongoApp() {
   // Absent cards and unread cards look identical in the map, and telling
   // somebody "he has not registered a card" sends them chasing the wrong person.
   const [memberCardsFailed, setMemberCardsFailed] = useState(false);
+  // The settlement report is only meaningful once the cards have actually been
+  // fetched; firing before that counted every card as missing.
+  const [memberCardsLoaded, setMemberCardsLoaded] = useState(false);
+  const lastSettlementReport = useRef('');
   // Hidden behind a long-press on the account header. Google's Android
   // downloads are blocked from Iran, so adb logcat is not reachable for the
   // people who need to know why an ad slot is empty.
@@ -881,14 +894,21 @@ function DongoApp() {
    * elsewhere.
    */
   useEffect(() => {
-    if (tab !== 'settlement' || storiesHome || !storyId) return;
-    track('settlement_viewed', {
+    // Reset on the way out so the next visit is reported again, but never
+    // report the same picture twice within one visit.
+    if (tab !== 'settlement' || storiesHome || !storyId) { lastSettlementReport.current = ''; return; }
+    if (!memberCardsLoaded) return;
+    const payload = {
       transfers: transfers.length,
       missing_cards: transfers.filter((transfer) => !memberCards[transfer.toId]).length,
       guest_targets: transfers.filter((transfer) => memberById(transfer.toId)?.kind === 'guest').length,
       my_card: Boolean(savedCardNumber.trim()),
-    });
-  }, [tab, storiesHome, storyId, transfers.length, memberCards, savedCardNumber]);
+    };
+    const key = `${storyId}|${JSON.stringify(payload)}`;
+    if (lastSettlementReport.current === key) return;
+    lastSettlementReport.current = key;
+    track('settlement_viewed', payload);
+  }, [tab, storiesHome, storyId, memberCardsLoaded, transfers.length, memberCards, savedCardNumber]);
 
   useEffect(() => {
     let refreshTimer: ReturnType<typeof setTimeout> | undefined;
@@ -914,9 +934,11 @@ function DongoApp() {
   async function refreshMemberCards(targetStoryId = storyId) {
     if (isLocalWebPreview) {
       setMemberCards(Object.fromEntries(members.map((member) => [member.id, '6219861012345678'])));
+      setMemberCardsLoaded(true);
       return;
     }
     if (!targetStoryId) return;
+    setMemberCardsLoaded(false);
     try {
       setMemberCards(await loadStoryMemberCards(targetStoryId));
       setMemberCardsFailed(false);
@@ -924,6 +946,8 @@ function DongoApp() {
       // Card numbers are a convenience; settling still works without them.
       setMemberCards({});
       setMemberCardsFailed(true);
+    } finally {
+      setMemberCardsLoaded(true);
     }
   }
 
@@ -2207,6 +2231,9 @@ function DongoApp() {
         </View>}
         {renderAdCard()}
         <Pressable accessibilityRole="button" disabled={cloudBusy} onPress={() => setSignOutModal(true)} style={({ pressed }) => [styles.accountLogoutButton, pressed && styles.pressed, cloudBusy && { opacity: 0.65 }]}><LogOut size={18} color={C.debt} /><AppText style={styles.accountLogoutText}>خروج از حساب</AppText></Pressable>
+        {/* Asked for after a release where the only way to know which build was
+            on the phone was Android's own app-info screen. */}
+        <AppText style={styles.versionLine}>دنگودونگ · نسخهٔ {faDigits(APP_VERSION)}</AppText>
         {/* The ad diagnostics panel is support tooling, not a feature. It stays
             reachable by long-pressing the header above, so nobody has to read
             "وضعیت فنی تبلیغ‌ها" and wonder whether it is something they broke. */}
@@ -3398,7 +3425,11 @@ const styles = StyleSheet.create({
   addNavDisabled: { opacity: 0.35 },
   addNavCircle: { width: 52, height: 52, borderRadius: 19, backgroundColor: C.coral, alignItems: 'center', justifyContent: 'center', borderWidth: 4, borderColor: C.paper, shadowColor: C.coral, shadowOpacity: 0.28, shadowRadius: 10, shadowOffset: { width: 0, height: 5 }, elevation: 5, transform: [{ rotate: '-3deg' }] },
   addNavLabel: { fontFamily: F.bold, color: C.coralInk, fontSize: 9, marginTop: 1 },
-  toast: { position: 'absolute', bottom: 98, left: 22, right: 22, minHeight: 51, borderRadius: 18, backgroundColor: C.ink, paddingHorizontal: 14, flexDirection: 'row-reverse', alignItems: 'center', gap: 9, shadowColor: C.ink, shadowOpacity: 0.2, shadowRadius: 12, elevation: 8 },
+  // Anchored to the top, not the bottom. The floating nav is 78 tall and sits
+  // at insets.bottom + 10, so on any phone with gesture navigation its top edge
+  // reaches past the 98 this used to sit at — every error message was landing
+  // behind the nav bar and nobody ever saw why something failed.
+  toast: { position: 'absolute', top: 78, left: 22, right: 22, minHeight: 51, borderRadius: 18, backgroundColor: C.ink, paddingHorizontal: 14, flexDirection: 'row-reverse', alignItems: 'center', gap: 9, shadowColor: C.ink, shadowOpacity: 0.2, shadowRadius: 12, elevation: 8 },
   toastCheck: { width: 27, height: 27, borderRadius: 10, backgroundColor: C.mint, alignItems: 'center', justifyContent: 'center' },
   toastCheckError: { backgroundColor: C.debt },
   toastText: { flex: 1, fontFamily: F.semi, color: '#FFFFFF', fontSize: 11, textAlign: 'right' },
@@ -3669,6 +3700,7 @@ const styles = StyleSheet.create({
   accountSaveButton: { minHeight: 53, borderRadius: 17, backgroundColor: C.purple, alignItems: 'center', justifyContent: 'center' },
   accountSaveText: { fontFamily: F.bold, color: '#FFFFFF', fontSize: 12 },
   accountLogoutButton: { minHeight: 54, borderRadius: 18, borderWidth: 1, borderColor: '#F1C7CE', backgroundColor: '#FFF8F8', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  versionLine: { fontFamily: F.medium, fontSize: 11, color: C.faint, textAlign: 'center', marginTop: 14 },
   accountLogoutText: { fontFamily: F.bold, color: C.debt, fontSize: 11 },
   dashboardHero: { minHeight: 142, borderRadius: 27, backgroundColor: C.purplePale, borderWidth: 1, borderColor: '#DCD4FA', padding: 18, flexDirection: 'row-reverse', alignItems: 'center', gap: 13 },
   dashboardHeroIcon: { width: 62, height: 62, borderRadius: 22, backgroundColor: C.paper, alignItems: 'center', justifyContent: 'center', transform: [{ rotate: '-4deg' }] },
